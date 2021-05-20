@@ -204,7 +204,6 @@ private:
   //int CountBinOps = 0;
 
   static bool areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options = {});
-  static bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options = {});
   static bool matchWholeBlocks(Value *V1, Value *V2);
 
   void replaceByCall(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
@@ -363,16 +362,11 @@ public:
 
 FunctionMergeResult MergeFunctions(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
 
-
-class FunctionMerging : public ModulePass {
+class FunctionMergingPass : public PassInfoMixin<FunctionMergingPass> {
 public:
-  static char ID;
-  FunctionMerging() : ModulePass(ID) {
-     initializeFunctionMergingPass(*PassRegistry::getPassRegistry());
-  }
-  bool runOnModule(Module &M) override;
-  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 };
+
 
 } // namespace
 #endif
