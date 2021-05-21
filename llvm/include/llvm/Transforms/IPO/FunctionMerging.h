@@ -70,6 +70,7 @@ namespace llvm{
 
 struct MatchingBlocks {
   BasicBlock *Blocks[2];
+  std::map<Instruction*, Instruction*> MatchingInsts;
 
   MatchingBlocks() {
     Blocks[0] = Blocks[1] = nullptr;
@@ -81,6 +82,15 @@ struct MatchingBlocks {
   }
 
   BasicBlock *operator[](size_t i) { return Blocks[i]; }
+
+  void match(Instruction *I1, Instruction *I2) {
+    MatchingInsts[I1] = I2;
+  }
+
+  bool isMatching(Instruction *I1, Instruction *I2) {
+    if (MatchingInsts.find(I1)==MatchingInsts.end()) return false;
+    return (MatchingInsts[I1]==I2);
+  }
 };
 
 /// A set of parameters used to control the transforms by MergeFunctions.
@@ -205,6 +215,7 @@ private:
 
   static bool areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options = {});
   static bool matchWholeBlocks(Value *V1, Value *V2);
+  static bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2);
 
   void replaceByCall(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
   bool replaceCallsWith(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
