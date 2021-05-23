@@ -176,8 +176,8 @@ FunctionMergeResult MergeFunctions(Function *F1, Function *F2,
   if (F1->getParent()!=F2->getParent())
     return FunctionMergeResult(F1,F2,nullptr);
   FunctionMerger Merger(F1->getParent());
-  std::vector<MatchingBlocks> AlignedBlocks;
-  return Merger.merge(F1,F2,"",AlignedBlocks,Options);
+  AlignmentResult AR;
+  return Merger.merge(F1,F2,"",AR,Options);
 }
 
 static bool CmpNumbers(uint64_t L, uint64_t R) {
@@ -415,44 +415,6 @@ bool FunctionMerger::matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2) {
   return true;
 }
 
-/*
-bool FunctionMerger::matchWholeBlocks(Value *V1, Value *V2) {
-  if (isa<BasicBlock>(V1) && isa<BasicBlock>(V2)) {
-    BasicBlock *BB1 = dyn_cast<BasicBlock>(V1);
-    BasicBlock *BB2 = dyn_cast<BasicBlock>(V2);
-
-    if (BB1->isLandingPad() || BB2->isLandingPad()) {
-      LandingPadInst *LP1 = BB1->getLandingPadInst();
-      LandingPadInst *LP2 = BB2->getLandingPadInst();
-      if (LP1 == nullptr || LP2 == nullptr)
-        return false;
-      if (!matchLandingPad(LP1, LP2)) return false;
-    }
-    
-    auto It1 = BB1->begin();
-    auto It2 = BB2->begin();
-
-    while(It1!=BB1->end() && (isa<PHINode>(*It1) || isa<LandingPadInst>(*It1))) It1++;
-    while(It2!=BB2->end() && (isa<PHINode>(*It2) || isa<LandingPadInst>(*It2))) It2++;
-
-    while (It1!=BB1->end() && It2!=BB2->end()) {
-      Instruction *I1 = &*It1;
-      Instruction *I2 = &*It2;
-
-      if (!I1->isSameOperationAs(I2)) return false;
-      
-      It1++;
-      It2++;
-    }
-
-    if (It1!=BB1->end() || It2!=BB2->end()) return false;
-    
-    return true;
-  }
-  return false;
-}
-*/
-
 bool FunctionMerger::validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options) {
   bool EquivTypes = areTypesEquivalent(F1->getReturnType(), F2->getReturnType(), DL, Options);
   if (!EquivTypes &&
@@ -489,7 +451,7 @@ static bool validMergePair(Function *F1, Function *F2) {
 }
 
 static void MergeArguments(LLVMContext &Context, Function *F1, Function *F2,
-  std::vector<MatchingBlocks> &AlignedBlocks,
+  AlignmentResult &AR,
   std::map<unsigned, unsigned> &ParamMap1, std::map<unsigned, unsigned> &ParamMap2, std::vector<Type *> &Args, const FunctionMergingOptions &Options) {
 
   std::vector<Argument *> ArgsList1;
@@ -539,7 +501,7 @@ static void MergeArguments(LLVMContext &Context, Function *F1, Function *F2,
 
     
     if (MatchingScore.size() > 0) { // maximize scores
-      for (auto &MB : AlignedBlocks) {
+      for (auto &MB : AR.AlignedBlocks) {
         BasicBlock *BB1 = MB[0];
         BasicBlock *BB2 = MB[1];
 	if (BB1==nullptr || BB2==nullptr) continue;
@@ -554,16 +516,17 @@ static void MergeArguments(LLVMContext &Context, Function *F1, Function *F2,
           Instruction *I1 = &*It1;
           Instruction *I2 = &*It2;
 
-          for (unsigned i = 0; i < I1->getNumOperands(); i++) {
-            for (auto KV : MatchingScore) {
-              if (I1->getOperand(i) == ArgsList1[KV.first]) {
-                if (i < I2->getNumOperands() && I2->getOperand(i) == &(*I)) {
-                  MatchingScore[KV.first]++;
+	  if (MB.isMatching(I1,I2)) {
+            for (unsigned i = 0; i < I1->getNumOperands(); i++) {
+              for (auto KV : MatchingScore) {
+                if (I1->getOperand(i) == ArgsList1[KV.first]) {
+                  if (i < I2->getNumOperands() && I2->getOperand(i) == &(*I)) {
+                    MatchingScore[KV.first]++;
+                  }
                 }
               }
             }
           }
-
           It1++;
           It2++;
         }
@@ -949,7 +912,7 @@ public:
   }
 };
 
-bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, std::vector<MatchingBlocks> &AlignedBlocks, const FunctionMergingOptions &Options) {  
+bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResult &AR, const FunctionMergingOptions &Options) {  
   int TotalMatches = 0;
   int TotalInsts = 0;
   int TotalCoreMatches = 0;
@@ -1050,8 +1013,8 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, std::vector<M
         It2 = BB2->begin();
 
         if (Profitable) {
-          AlignedBlocks.push_back(MatchingBlocks(BB1,BB2));
-          auto &MB = AlignedBlocks.back();
+          AR.AlignedBlocks.push_back(MatchingBlocks(BB1,BB2));
+          auto &MB = AR.AlignedBlocks.back();
 
           while(isa<PHINode>(*It1) || isa<LandingPadInst>(*It1)) It1++;
           while(isa<PHINode>(*It2) || isa<LandingPadInst>(*It2)) It2++;
@@ -1068,7 +1031,9 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, std::vector<M
     	  if (!I1->isTerminator()) {
     	    TotalCoreMatches++;
     	  }
-            }
+            } else {
+		 AR.OnlyFullMatches = false;
+	    }
 
             It1++;
             It2++;
@@ -1087,14 +1052,14 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, std::vector<M
   return Profitable;
 }
 
-FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::string Name, std::vector<MatchingBlocks> &AlignedBlocks, const FunctionMergingOptions &Options) {
+FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, const FunctionMergingOptions &Options) {
   LLVMContext &Context = *ContextPtr;
   FunctionMergeResult ErrorResponse(F1, F2, nullptr);
 
   if (!validMergePair(F1,F2))
     return ErrorResponse;
 
-  if (!pairwiseAlignment(F1, F2, AlignedBlocks, Options))
+  if (!pairwiseAlignment(F1, F2, AR, Options))
     return ErrorResponse;
 
   errs() << "Creating function type\n";
@@ -1106,7 +1071,7 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
 
 
   //errs() << "Merging arguments\n";
-  MergeArguments(Context, F1, F2, AlignedBlocks, ParamMap1,ParamMap2,Args,Options);
+  MergeArguments(Context, F1, F2, AR, ParamMap1,ParamMap2,Args,Options);
 
   Type *RetType1 = F1->getReturnType();
   Type *RetType2 = F2->getReturnType();
@@ -1204,7 +1169,7 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
       .setMergedReturnType(ReturnType, RequiresUnifiedReturn)
       .setContext(ContextPtr)
       .setIntPtrType(IntPtrTy);
-    if (!CG.generate(AlignedBlocks, VMap, Options)) {
+    if (!CG.generate(AR, VMap, Options)) {
       MergedFunc->eraseFromParent();
       MergedFunc = nullptr;
       if (Debug) errs() << "ERROR: Failed to generate the merged function!\n";
@@ -1348,11 +1313,6 @@ bool FunctionMerger::replaceCallsWith(Function *F, FunctionMergeResult &MFR, con
       InvokeInst *II = dyn_cast<InvokeInst>(CI);
       NewCB = (InvokeInst *)Builder.CreateInvoke(MergedF->getFunctionType(),
                                                       MergedF, II->getNormalDest(), II->getUnwindDest(), args);
-      //MergedF->dump();
-      //MergedF->getFunctionType()->dump();
-      //errs() << "Invoke CallUpdate:\n";
-      //II->dump();
-      //NewCB->dump();
     }
     NewCB->setCallingConv(MergedF->getCallingConv());
     NewCB->setAttributes(MergedF->getAttributes());
@@ -1369,7 +1329,6 @@ bool FunctionMerger::replaceCallsWith(Function *F, FunctionMergeResult &MFR, con
       }
     }
 
-    // if (F->getReturnType()==MergedF->getReturnType())
     if (CI->getNumUses() > 0) {
       CI->replaceAllUsesWith(CastedV);
     }
@@ -1441,29 +1400,11 @@ static int EstimateThunkOverhead(FunctionMergeResult &MFR, StringSet<> &AlwaysPr
   return RequiresOriginalInterfaces(MFR, AlwaysPreserved)*(2+MFR.getMergedFunction()->getFunctionType()->getNumParams());
 }
 
-/*
-static bool CompareFunctionScores(const std::pair<Function *, unsigned> &F1,
-                                  const std::pair<Function *, unsigned> &F2) {
-  return F1.second > F2.second;
-}
-*/
-//#define FMSA_USE_JACCARD
-
 size_t EstimateFunctionSize(Function *F, TargetTransformInfo *TTI) {
   InstructionCost size = 0;
   for (Instruction &I : instructions(F)) {
-    switch(I.getOpcode()) {
-    //case Instruction::Alloca:
-    //case Instruction::PHI:
-    //  size += 0.2;
-    //  break;
-    //case Instruction::Select:
-    //  size += 1.2;
-    //  break;
-    default:
-      size += TTI->getInstructionCost(
-        &I, TargetTransformInfo::TargetCostKind::TCK_CodeSize);
-    }
+    size += TTI->getInstructionCost(
+      &I, TargetTransformInfo::TargetCostKind::TCK_CodeSize);
   }
 
   auto OptSize = size.getValue();
@@ -1639,10 +1580,10 @@ bool FunctionMerging::runImpl(Module &M) {
         errs() << "Attempting: " << GetValueName(F1) << ", " << GetValueName(F2) << "\n";
       }
 
-      std::vector<MatchingBlocks> AlignedBlocks;
+      AlignmentResult AR;
 
       std::string Name = ".m.f." + std::to_string(TotalMerges);
-      FunctionMergeResult Result = FM.merge(F1,F2,Name,AlignedBlocks,Options);
+      FunctionMergeResult Result = FM.merge(F1,F2,Name,AR,Options);
 
       bool validFunction = true;
 
@@ -1668,7 +1609,11 @@ bool FunctionMerging::runImpl(Module &M) {
 
         int SizeF1F2 = SizeF1+SizeF2;
 
-	bool Profitable = (SizeF12 + MergingOverheadThreshold) < SizeF1F2;
+	//bool Profitable = (SizeF12 + MergingOverheadThreshold) < SizeF1F2;
+
+	bool Profitable = ((int)( (( ((double)SizeF1F2) - ((double)SizeF12) ) / SizeF1F2) * 100 ) > MergingOverheadThreshold)
+		  || (SizeF12 < SizeF1F2 && AR.OnlyFullMatches);
+	//Profitable = Profitable && ((int)( (( ((double)SizeF1F2) - ((double)SizeF12) ) / SizeF1F2) * 100 )>5);
 
         if (Debug || Verbose) {
           errs() << "Estimated Sizes: " << SizeF1 << " + " << SizeF2 << " <= " << SizeF12 << "? " << ( ((int)SizeF1F2)- ((int)SizeF12) ) << " (" << Profitable << ") ";
@@ -1684,7 +1629,7 @@ bool FunctionMerging::runImpl(Module &M) {
           TotalOpReorder += CountOpReorder;
           TotalBinOps += CountBinOps;
 
-	  for (auto &MB : AlignedBlocks) {
+	  for (auto &MB : AR.AlignedBlocks) {
             BasicBlock *BB1 = MB[0];
             BasicBlock *BB2 = MB[1];
 
@@ -1930,7 +1875,7 @@ template<typename BlockListType>
 static void CodeGen(BlockListType &Blocks1, BlockListType &Blocks2,
                     BasicBlock *EntryBB1, BasicBlock *EntryBB2,
                     Function *MergedFunc, Value *IsFunc1, BasicBlock *PreBB,
-                    std::vector<MatchingBlocks> &AlignedBlocks,
+                    AlignmentResult &AR,
                     ValueToValueMapTy &VMap,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
@@ -1987,7 +1932,7 @@ static void CodeGen(BlockListType &Blocks1, BlockListType &Blocks2,
   std::unordered_set<BasicBlock *> BlocksCloned;
   
   errs() << "Cloning Merged Blocks \n";
-  for (auto &MB : AlignedBlocks) {
+  for (auto &MB : AR.AlignedBlocks) {
     BasicBlock *BB1 = MB[0];
     BasicBlock *BB2 = MB[1];
 
@@ -2159,7 +2104,7 @@ static void CodeGen(BlockListType &Blocks1, BlockListType &Blocks2,
 }
 
 template<typename BlockListType>
-bool FunctionMerger::SALSSACodeGen<BlockListType>::generate(std::vector<MatchingBlocks> &AlignedBlocks,
+bool FunctionMerger::SALSSACodeGen<BlockListType>::generate(AlignmentResult &AR,
                   ValueToValueMapTy &VMap,
                   const FunctionMergingOptions &Options) {
 
@@ -2198,7 +2143,7 @@ bool FunctionMerger::SALSSACodeGen<BlockListType>::generate(std::vector<Matching
   std::unordered_map<BasicBlock *, BasicBlock *> BlocksF2;
   std::list<MergedInstruction> MergedInsts;
 
-  CodeGen(Blocks1,Blocks2,EntryBB1,EntryBB2,MergedFunc,IsFunc1,PreBB,AlignedBlocks,VMap,BlocksF1,BlocksF2,MergedInsts);
+  CodeGen(Blocks1,Blocks2,EntryBB1,EntryBB2,MergedFunc,IsFunc1,PreBB,AR,VMap,BlocksF1,BlocksF2,MergedInsts);
 
   if (RequiresUnifiedReturn) {
     IRBuilder<> Builder(PreBB);

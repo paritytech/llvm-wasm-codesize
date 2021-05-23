@@ -93,6 +93,13 @@ struct MatchingBlocks {
   }
 };
 
+struct AlignmentResult {
+  std::vector<MatchingBlocks> AlignedBlocks;
+  bool OnlyFullMatches;
+
+  AlignmentResult() : OnlyFullMatches(true) {}
+};
+
 /// A set of parameters used to control the transforms by MergeFunctions.
 struct FunctionMergingOptions {
   bool MaximizeParamScore;
@@ -209,7 +216,7 @@ private:
   static bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2);
 
   static bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options = {});
-  bool pairwiseAlignment(Function *F1, Function *F2, std::vector<MatchingBlocks> &AlignedBlocks, const FunctionMergingOptions &Options = {});
+  bool pairwiseAlignment(Function *F1, Function *F2, AlignmentResult &AR, const FunctionMergingOptions &Options = {});
 
   void replaceByCall(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
   bool replaceCallsWith(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
@@ -229,7 +236,7 @@ public:
 
   void updateCallGraph(FunctionMergeResult &Result, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options = {});
 
-  FunctionMergeResult merge(Function *F1, Function *F2, std::string Name, std::vector<MatchingBlocks> &AlignedBlocks, const FunctionMergingOptions &Options = {});
+  FunctionMergeResult merge(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, const FunctionMergingOptions &Options = {});
 
   template<typename BlockListType>
   class CodeGenerator {
@@ -339,7 +346,7 @@ public:
     void erase(BasicBlock *BB) { CreatedBBs.erase(BB); }
     void erase(Instruction *I) { CreatedInsts.erase(I); }
 
-    virtual bool generate(std::vector<MatchingBlocks> &AlignedBlocks,
+    virtual bool generate(AlignmentResult &AR,
                   ValueToValueMapTy &VMap,
                   const FunctionMergingOptions &Options = {}) = 0;
 
@@ -355,7 +362,7 @@ public:
     
   public:
     SALSSACodeGen(BlockListType &Blocks1, BlockListType &Blocks2) : CodeGenerator<BlockListType>(Blocks1,Blocks2) {}
-    virtual bool generate(std::vector<MatchingBlocks> &AlignedBlocks,
+    virtual bool generate(AlignmentResult &AR,
                   ValueToValueMapTy &VMap,
                   const FunctionMergingOptions &Options = {});
   };
