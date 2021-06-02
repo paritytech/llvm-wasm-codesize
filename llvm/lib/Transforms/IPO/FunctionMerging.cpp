@@ -48,81 +48,27 @@
 
 #include "llvm/Transforms/IPO/FunctionMerging.h"
 
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/IR/InstrTypes.h"
-#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Verifier.h"
-#include <llvm/IR/IRBuilder.h>
-
-#include "llvm/Support/Error.h"
-#include "llvm/Support/Timer.h"
-
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/FormatVariadic.h"
-
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/CFG.h"
-#include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/Analysis/IteratedDominanceFrontier.h"
-#include "llvm/Analysis/InstructionSimplify.h"
-
-#include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/CodeExtractor.h"
-
-#include "llvm/Support/RandomNumberGenerator.h"
-
-#include "llvm/ADT/BreadthFirstIterator.h"
-#include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
-
-#include "llvm/Analysis/Utils/Local.h"
-#include "llvm/Transforms/Utils/Local.h"
-
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Utils/FunctionComparator.h"
-#include "llvm/Transforms/Utils/Mem2Reg.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 
-#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Transforms/IPO.h"
-
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
-
-#include <cstdlib>
-#include <fstream>
 
 #include <algorithm>
 #include <list>
+#include <set>
 #include <unordered_set>
 #include <unordered_map>
-
-#include <limits.h>
-
-#include <functional>
-#include <queue>
 #include <vector>
-
-#include <algorithm>
-#include <stdlib.h>
-#include <time.h>
 
 #define DEBUG_TYPE "MyFuncMerge"
 
 #define ENABLE_DEBUG_CODE
-
-#define TIME_STEPS_DEBUG
 
 using namespace llvm;
 

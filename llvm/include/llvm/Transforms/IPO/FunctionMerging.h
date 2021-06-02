@@ -48,22 +48,16 @@
 
 #include "llvm/InitializePasses.h"
 
-#include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/ProfileSummaryInfo.h"
-#include "llvm/Analysis/BlockFrequencyInfo.h"
-
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/IRBuilder.h"
-
+#include "llvm/IR/Dominators.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSet.h"
-
-#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
 
 #include <map>
-#include <unordered_map>
 #include <vector>
 
 namespace llvm{
@@ -202,9 +196,6 @@ public:
 class FunctionMerger {
 private:
   Module *M;
-
-  ProfileSummaryInfo *PSI;
-  function_ref<BlockFrequencyInfo *(Function &)> LookupBFI;
 
   Type *IntPtrTy;
 
