@@ -174,13 +174,12 @@ public:
   Instruction *operator[](size_t i) { return Insts[i]; }
 };
 
-class CodeGenerator {
+class CodeMerger {
 private:
   LLVMContext *ContextPtr;
   Type *IntPtrTy;
 
-  Value *IsFunc1;
-
+  Value *IsFirst;
 
   ArrayRef<BasicBlock*> Blocks1;
   ArrayRef<BasicBlock*> Blocks2;
@@ -195,66 +194,81 @@ private:
 
   bool RequiresUnifiedReturn;
 
-  Function *MergedFunc;
-
+  Function *F;
+  std::vector<SelectInst*> AllSelections;
 
   SmallPtrSet<BasicBlock*,8> CreatedBBs;
   SmallPtrSet<Instruction*,8> CreatedInsts;
 
-protected:
   void removeRedundantInstructions(std::vector<Instruction *> &WorkInst, DominatorTree &DT);
-public:
-  CodeGenerator(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : Blocks1(Blocks1), Blocks2(Blocks2) {}
 
-  CodeGenerator &setContext(LLVMContext *ContextPtr) {
+  Value *MergeValues(Value *V1, Value *V2, Instruction *InsertPt);
+  bool AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueMapTy &VMap);
+  bool AssignLabelOperands(Instruction *I, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap);
+  bool AssignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap);
+  void StoreInstIntoAddr(Instruction *IV, Value *Addr);
+  AllocaInst* MemfyInst(Instruction *I);
+
+
+  Instruction *CloneInst(IRBuilder<> &Builder, Function *MF, Instruction *I);
+
+  void CodeGen(AlignmentResult &AR,
+                    ValueToValueMapTy &VMap,
+                    std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
+                    std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
+                    std::list<MergedInstruction> &MergedInsts
+		    );
+public:
+  CodeMerger(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : Blocks1(Blocks1), Blocks2(Blocks2) {}
+
+  CodeMerger &setContext(LLVMContext *ContextPtr) {
     this->ContextPtr = ContextPtr;
     return *this;
   }
 
-
-  CodeGenerator &setIntPtrType(Type *IntPtrTy) {
+  CodeMerger &setIntPtrType(Type *IntPtrTy) {
     this->IntPtrTy = IntPtrTy;
     return *this;
   }
 
-  CodeGenerator &setFunctionIdentifier(Value *IsFunc1) {
-    this->IsFunc1 = IsFunc1;
+  CodeMerger &setCondition(Value *IsFirst) {
+    this->IsFirst = IsFirst;
     return *this;
   }
 
-  CodeGenerator &setEntryPoints(BasicBlock *EntryBB1, BasicBlock *EntryBB2) {
+  CodeMerger &setEntryPoints(BasicBlock *EntryBB1, BasicBlock *EntryBB2) {
     this->EntryBB1 = EntryBB1;
     this->EntryBB2 = EntryBB2;
     return *this;
   }
 
-  CodeGenerator &setReturnTypes(Type *RetType1, Type *RetType2) {
+  CodeMerger &setReturnTypes(Type *RetType1, Type *RetType2) {
     this->RetType1 = RetType1;
     this->RetType2 = RetType2;
     return *this;
   }
 
-  CodeGenerator &setMergedEntryPoint(BasicBlock *PreBB) {
+  CodeMerger &setEntryPoint(BasicBlock *PreBB) {
     this->PreBB = PreBB;
     return *this;
   }
 
-  CodeGenerator &setMergedReturnType(Type *ReturnType, bool RequiresUnifiedReturn=false) {
+  CodeMerger &setReturnType(Type *ReturnType, bool RequiresUnifiedReturn=false) {
     this->ReturnType = ReturnType;
     this->RequiresUnifiedReturn = RequiresUnifiedReturn;
     return *this;
   }
 
-  CodeGenerator &setMergedFunction(Function *MergedFunc) {
-    this->MergedFunc = MergedFunc;
+  CodeMerger &setFunction(Function *F) {
+    this->F = F;
     return *this;
   }
 
-  Function *getMergedFunction() { return MergedFunc; }
-  Type *getMergedReturnType() { return ReturnType; }
+  Function *getFunction() { return F; }
+  Type *getReturnType() { return ReturnType; }
   bool getRequiresUnifiedReturn() { return RequiresUnifiedReturn; }
 
-  Value *getFunctionIdentifier() { return IsFunc1; }
+  Value *getCondition() { return IsFirst; }
 
   LLVMContext &getContext() { return *ContextPtr; }
 
@@ -277,41 +291,15 @@ public:
   void erase(BasicBlock *BB) { CreatedBBs.erase(BB); }
   void erase(Instruction *I) { CreatedInsts.erase(I); }
 
-  virtual bool generate(AlignmentResult &AR,
+  bool generate(AlignmentResult &AR,
                 ValueToValueMapTy &VMap,
-                const FunctionMergingOptions &Options = {}) = 0;
+                const FunctionMergingOptions &Options = {});
 
   void destroyGeneratedCode();
 
   SmallPtrSet<Instruction*,8>::const_iterator begin() const { return CreatedInsts.begin(); }
   SmallPtrSet<Instruction*,8>::const_iterator end() const { return CreatedInsts.end(); }
 
-};
-
-class SALSSACodeGen : public CodeGenerator {
-  std::vector<SelectInst*> AllSelections;
-public:
-  SALSSACodeGen(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : CodeGenerator(Blocks1,Blocks2) {}
-  virtual bool generate(AlignmentResult &AR,
-                ValueToValueMapTy &VMap,
-                const FunctionMergingOptions &Options = {});
-
-  Value *MergeValues(Value *V1, Value *V2, Instruction *InsertPt);
-  bool AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueMapTy &VMap);
-  bool AssignLabelOperands(Instruction *I, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap);
-  bool AssignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap);
-  void StoreInstIntoAddr(Instruction *IV, Value *Addr);
-  AllocaInst* MemfyInst(Instruction *I);
-
-
-  Instruction *CloneInst(IRBuilder<> &Builder, Function *MF, Instruction *I);
-
-  void CodeGen(AlignmentResult &AR,
-                    ValueToValueMapTy &VMap,
-                    std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
-                    std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
-                    std::list<MergedInstruction> &MergedInsts
-		    );
 };
 
 class FunctionMerger {
@@ -935,7 +923,7 @@ Function *RemoveFuncIdArg(Function *F, std::vector<Argument *> &ArgsList) {
 
 static Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *IntPtrTy, const FunctionMergingOptions &Options = {});
 
-void CodeGenerator::destroyGeneratedCode() {
+void CodeMerger::destroyGeneratedCode() {
   for (Instruction *I : CreatedInsts) {
     I->dropAllReferences();
   }
@@ -1227,6 +1215,7 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
 
   //errs() << "Merging arguments\n";
   MergeArguments(Context, F1, F2, AR, ParamMap1,ParamMap2,Args,Options);
+
   Type *RetType1 = F1->getReturnType();
   Type *RetType2 = F2->getReturnType();
   Type *ReturnType = nullptr;
@@ -1314,14 +1303,13 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
   for (auto &BB : *F1) Blocks1.push_back(&BB);
   SmallVector<BasicBlock*, 8> Blocks2;
   for (auto &BB : *F2) Blocks2.push_back(&BB);
-  SALSSACodeGen CG(Blocks1,Blocks2);
+  CodeMerger CG(Blocks1,Blocks2);
   
-  CG.setFunctionIdentifier(IsFunc1)
+  CG.setCondition(IsFunc1)
     .setEntryPoints(&F1->getEntryBlock(), &F2->getEntryBlock())
-    .setReturnTypes(RetType1,RetType2)
-    .setMergedFunction(MergedFunc)
-    .setMergedEntryPoint(BasicBlock::Create(Context, "entry", MergedFunc))
-    .setMergedReturnType(ReturnType, RequiresUnifiedReturn)
+    .setFunction(MergedFunc)
+    .setEntryPoint(BasicBlock::Create(Context, "entry", MergedFunc))
+    .setReturnType(ReturnType, RequiresUnifiedReturn)
     .setContext(ContextPtr)
     .setIntPtrType(IntPtrTy);
   if (!CG.generate(AR, VMap, Options)) {
@@ -1929,7 +1917,7 @@ Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *I
 }
 
 
-void CodeGenerator::removeRedundantInstructions(std::vector<Instruction *> &WorkInst, DominatorTree &DT) {
+void CodeMerger::removeRedundantInstructions(std::vector<Instruction *> &WorkInst, DominatorTree &DT) {
   std::set<Instruction *> SkipList;
 
   std::map<Instruction *, std::list<Instruction *>> UpdateList;
@@ -1968,10 +1956,7 @@ void CodeGenerator::removeRedundantInstructions(std::vector<Instruction *> &Work
   }
 }
 
-
-////////////////////////////////////   SALSSA   ////////////////////////////////
-
-Instruction *SALSSACodeGen::CloneInst(IRBuilder<> &Builder, Function *MF, Instruction *I) {
+Instruction *CodeMerger::CloneInst(IRBuilder<> &Builder, Function *MF, Instruction *I) {
   Instruction *NewI = nullptr;
   if (I->getOpcode() == Instruction::Ret) {
     if (MF->getReturnType()->isVoidTy()) {
@@ -1993,8 +1978,8 @@ Instruction *SALSSACodeGen::CloneInst(IRBuilder<> &Builder, Function *MF, Instru
   }
   
   //NewI->dropPoisonGeneratingFlags(); //TODO: NOT SURE IF THIS IS VALID
-
-  // TODO: temporarily removing metadata
+  
+  // TODO: temporarily removing metadata\
   
   SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
   NewI->getAllMetadata(MDs);
@@ -2018,21 +2003,18 @@ Instruction *SALSSACodeGen::CloneInst(IRBuilder<> &Builder, Function *MF, Instru
 }
 
 
-void SALSSACodeGen::CodeGen(
-                    AlignmentResult &AR,
-                    ValueToValueMapTy &VMap,
+void CodeMerger::CodeGen(AlignmentResult &AR, ValueToValueMapTy &VMap,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
-                    std::list<MergedInstruction> &MergedInsts
-		    ) {
+                    std::list<MergedInstruction> &MergedInsts) {
 
-  Function *MergedFunc = getMergedFunction();
+  Function *MergedFunc = getFunction();
   auto Blocks1 = getBlocks1();
   auto Blocks2 = getBlocks2();
   BasicBlock *EntryBB1 = getEntryBlock1();
   BasicBlock *EntryBB2 = getEntryBlock2();
   BasicBlock *PreBB = getPreBlock();
-  Value *IsFunc1 = getFunctionIdentifier();
+  Value *IsFunc1 = getCondition();
 
 
   std::unordered_set<BasicBlock *> BlocksCloned;
@@ -2207,41 +2189,41 @@ void SALSSACodeGen::CodeGen(
   }
 }
 
-Value *SALSSACodeGen::MergeValues(Value *V1, Value *V2, Instruction *InsertPt) {
+Value *CodeMerger::MergeValues(Value *V1, Value *V2, Instruction *InsertPt) {
   if (V1 == V2)
     return V1;
 
   LLVMContext &Context = getContext();
-  Value *IsFunc1 = getFunctionIdentifier();
+  Value *IsFirst = getCondition();
 
   if (V1 == ConstantInt::getTrue(Context) &&
       V2 == ConstantInt::getFalse(Context)) {
-    return IsFunc1;
+    return IsFirst;
   } else if (V1 == ConstantInt::getFalse(Context) &&
              V2 == ConstantInt::getTrue(Context)) {
     IRBuilder<> Builder(InsertPt);
-    return Builder.CreateNot(IsFunc1); /// TODO: create a single not(IsFunc1) for each merged function that needs it
+    return Builder.CreateNot(IsFirst); /// TODO: create a single not(IsFunc1) for each merged function that needs it
   }
 
   IRBuilder<> Builder(InsertPt);
-  Instruction *Sel = (Instruction *)Builder.CreateSelect(IsFunc1, V1, V2);
+  Instruction *Sel = (Instruction *)Builder.CreateSelect(IsFirst, V1, V2);
   if (SelectInst *SelI = dyn_cast<SelectInst>(Sel)) {
     AllSelections.push_back(SelI);
   }
   return Sel;
 }
 
-bool SALSSACodeGen::AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueMapTy &VMap) {
+bool CodeMerger::AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueMapTy &VMap) {
   Instruction *NewI = dyn_cast<Instruction>(VMap[I]);
   IRBuilder<> Builder(NewI);
 
   bool RequiresUnifiedReturn = getRequiresUnifiedReturn();
-  Type *ReturnType = getMergedReturnType();
+  Type *ReturnType = getReturnType();
 
   if (I->getOpcode() == Instruction::Ret && RequiresUnifiedReturn) {
     Value *V = MapValue(I->getOperand(0), VMap);
     if (V == nullptr) {
-      return false; // ErrorResponse;
+      return false;
     }
     if (V->getType() != ReturnType) {
       Value *Addr = Builder.CreateAlloca(V->getType());
@@ -2258,7 +2240,7 @@ bool SALSSACodeGen::AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueM
       Value *V = MapValue(I->getOperand(i), VMap);
       // assert( V!=nullptr && "Mapped value should NOT be NULL!");
       if (V == nullptr) {
-        return false; // ErrorResponse;
+        return false;
       }
 
       //Value *CastedV = createCastIfNeeded(V, NewI->getOperand(i)->getType(), Builder, IntPtrTy);
@@ -2269,11 +2251,11 @@ bool SALSSACodeGen::AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueM
   return true;
 }
 
-bool SALSSACodeGen::AssignLabelOperands(Instruction *I, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap) {
+bool CodeMerger::AssignLabelOperands(Instruction *I, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap) {
   Instruction *NewI = dyn_cast<Instruction>(VMap[I]);
 
   LLVMContext &Context = getContext();
-  Function *MergedFunc = getMergedFunction();
+  Function *MergedFunc = getFunction();
   for (unsigned i = 0; i < I->getNumOperands(); i++) {
     //handling just label operands for now
     if (!isa<BasicBlock>(I->getOperand(i))) continue;
@@ -2309,7 +2291,7 @@ bool SALSSACodeGen::AssignLabelOperands(Instruction *I, std::unordered_map<Basic
   return true;
 }
 
-bool SALSSACodeGen::AssignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap) {
+bool CodeMerger::AssignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap) {
   auto It = BB->begin();
   auto *EndI = BB->getFirstNonPHI();
   while (It!=BB->end() && (&*It)!=EndI) {
@@ -2347,7 +2329,7 @@ bool SALSSACodeGen::AssignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<
   return true;
 }
 
-void SALSSACodeGen::StoreInstIntoAddr(Instruction *IV, Value *Addr) {
+void CodeMerger::StoreInstIntoAddr(Instruction *IV, Value *Addr) {
   IRBuilder<> Builder(IV->getParent());
   if (IV->isTerminator()) {
     BasicBlock *SrcBB = IV->getParent();
@@ -2403,7 +2385,7 @@ void SALSSACodeGen::StoreInstIntoAddr(Instruction *IV, Value *Addr) {
   }
 }
 
-AllocaInst *SALSSACodeGen::MemfyInst(Instruction *I) {
+AllocaInst *CodeMerger::MemfyInst(Instruction *I) {
   BasicBlock *PreBB = getPreBlock();
 
   IRBuilder<> Builder(&*PreBB->getFirstInsertionPt());
@@ -2441,19 +2423,17 @@ AllocaInst *SALSSACodeGen::MemfyInst(Instruction *I) {
   return Addr;
 }
 
-bool SALSSACodeGen::generate(AlignmentResult &AR,
+bool CodeMerger::generate(AlignmentResult &AR,
                   ValueToValueMapTy &VMap,
                   const FunctionMergingOptions &Options) {
 
   LLVMContext &Context = getContext();
-  Function *MergedFunc = getMergedFunction();
-  Value *IsFunc1 = getFunctionIdentifier();
-  Type *ReturnType = getMergedReturnType();
-  bool RequiresUnifiedReturn = getRequiresUnifiedReturn();
+  Function *MergedFunc = getFunction();
+  Value *IsFirst = getCondition();
   BasicBlock *PreBB = getPreBlock();
   
-  Type *RetType1 = getReturnType1();
-  Type *RetType2 = getReturnType2();
+  //Type *RetType1 = getReturnType1();
+  //Type *RetType2 = getReturnType2();
 
   Type *IntPtrTy = getIntPtrType();
 
@@ -2581,7 +2561,7 @@ bool SALSSACodeGen::generate(AlignmentResult &AR,
             BlocksF1[SelectBB] = I1->getParent();
             BlocksF2[SelectBB] = I2->getParent();
 
-            BuilderBB.CreateCondBr(IsFunc1, BB1, BB2);
+            BuilderBB.CreateCondBr(IsFirst, BB1, BB2);
             V = SelectBB;
           }
           
@@ -2847,7 +2827,7 @@ bool SALSSACodeGen::generate(AlignmentResult &AR,
 
   for (BranchInst *NewBr : XorBrConds) {
     IRBuilder<> Builder(NewBr);
-    Value *XorCond = Builder.CreateXor(NewBr->getCondition(),IsFunc1);
+    Value *XorCond = Builder.CreateXor(NewBr->getCondition(),IsFirst);
     NewBr->setCondition(XorCond);
   }
 
