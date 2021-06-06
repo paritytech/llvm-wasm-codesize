@@ -149,11 +149,15 @@ struct MatchingBlocks {
   }
 };
 
-struct AlignmentResult {
+class CodeAlignment {
+public:
   std::vector<MatchingBlocks> AlignedBlocks;
-  bool OnlyFullMatches;
+  CodeAlignment() {}
+};
 
-  AlignmentResult() : OnlyFullMatches(true) {}
+class PairwiseAlignment : public CodeAlignment {
+public:
+  PairwiseAlignment(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2, const FunctionMergingOptions &Options = {});
 };
 
 class MergedInstruction {
@@ -177,6 +181,8 @@ public:
 class CodeMerger {
 private:
   Module *M;
+ 
+  const DataLayout *DL;
   LLVMContext *ContextPtr;
   Type *IntPtrTy;
 
@@ -215,26 +221,22 @@ private:
 
   Instruction *CloneInst(IRBuilder<> &Builder, Function *MF, Instruction *I);
 
-  void CodeGen(AlignmentResult &AR,
+  void CodeGen(CodeAlignment *AR,
                     ValueToValueMapTy &VMap,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
                     std::list<MergedInstruction> &MergedInsts
 		    );
 public:
-  CodeMerger(Module *M, ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : M(M), Blocks1(Blocks1), Blocks2(Blocks2) {}
-
-  FunctionMergeResult defineMergedFunction(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options = {});
-
-  CodeMerger &setContext(LLVMContext *ContextPtr) {
-    this->ContextPtr = ContextPtr;
-    return *this;
+  CodeMerger(Module *M, ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : M(M), Blocks1(Blocks1), Blocks2(Blocks2) {
+    if (M) {
+      DL = &M->getDataLayout();
+      ContextPtr = &M->getContext();
+      IntPtrTy = DL->getIntPtrType(*ContextPtr);
+    }
   }
 
-  CodeMerger &setIntPtrType(Type *IntPtrTy) {
-    this->IntPtrTy = IntPtrTy;
-    return *this;
-  }
+  FunctionMergeResult defineMergedFunction(Function *F1, Function *F2, const char *Name, CodeAlignment *AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options = {});
 
   CodeMerger &setCondition(Value *IsFirst) {
     this->IsFirst = IsFirst;
@@ -277,6 +279,7 @@ public:
 
   LLVMContext &getContext() { return *ContextPtr; }
 
+  Type *getIntPtrType() { return IntPtrTy; }
 
   ArrayRef<BasicBlock*> getBlocks1() { return Blocks1; }
   ArrayRef<BasicBlock*> getBlocks2() { return Blocks2; }
@@ -288,15 +291,13 @@ public:
   Type *getReturnType1() { return RetType1; }
   Type *getReturnType2() { return RetType2; }
 
-  Type *getIntPtrType() { return IntPtrTy; }
-
   void insert(BasicBlock *BB) { CreatedBBs.insert(BB); }
   void insert(Instruction *I) { CreatedInsts.insert(I); }
 
   void erase(BasicBlock *BB) { CreatedBBs.erase(BB); }
   void erase(Instruction *I) { CreatedInsts.erase(I); }
 
-  bool generate(AlignmentResult &AR,
+  bool generate(CodeAlignment *AR,
                 ValueToValueMapTy &VMap,
                 const FunctionMergingOptions &Options = {});
 
@@ -312,47 +313,13 @@ bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2);
 bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options = {});
 bool validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
 
-class FunctionMerger {
-private:
-  Module *M;
 
-  Type *IntPtrTy;
-
-  const DataLayout *DL;
-  LLVMContext *ContextPtr;
-
-  bool pairwiseAlignment(Function *F1, Function *F2, AlignmentResult &AR, const FunctionMergingOptions &Options = {});
-
-  void replaceByCall(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
-  bool replaceCallsWith(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
-
-  void updateCallGraph(Function *F, FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options);
-
+class FunctionMerging {
 public:
-  FunctionMerger(Module *M) : M(M), IntPtrTy(nullptr) {
-    if (M) {
-      DL = &M->getDataLayout();
-      ContextPtr = &M->getContext();
-      IntPtrTy = DL->getIntPtrType(*ContextPtr);
-    }
-  }
-
-  void updateCallGraph(FunctionMergeResult &Result, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options = {});
-
-  FunctionMergeResult merge(Function *F1, Function *F2, std::string Name, const FunctionMergingOptions &Options = {});
+  bool runImpl(Module &M);
 };
 
-
-
 static std::string GetValueName(const Value *V);
-
-FunctionMergeResult MergeFunctions(Function *F1, Function *F2,
- const FunctionMergingOptions &Options) {
-  if (F1->getParent()!=F2->getParent())
-    return FunctionMergeResult(F1,F2,nullptr);
-  FunctionMerger Merger(F1->getParent());
-  return Merger.merge(F1,F2,"",Options);
-}
 
 static bool CmpNumbers(uint64_t L, uint64_t R) {
   return L==R;
@@ -626,7 +593,7 @@ static bool validMergePair(Function *F1, Function *F2) {
 }
 
 static void MergeArguments(LLVMContext &Context, Function *F1, Function *F2,
-  AlignmentResult &AR,
+  CodeAlignment *AR,
   std::map<unsigned, unsigned> &ParamMap1, std::map<unsigned, unsigned> &ParamMap2, std::vector<Type *> &Args, const FunctionMergingOptions &Options) {
 
   std::vector<Argument *> ArgsList1;
@@ -676,7 +643,7 @@ static void MergeArguments(LLVMContext &Context, Function *F1, Function *F2,
 
     
     if (MatchingScore.size() > 0) { // maximize scores
-      for (auto &MB : AR.AlignedBlocks) {
+      for (auto &MB : AR->AlignedBlocks) {
         BasicBlock *BB1 = MB[0];
         BasicBlock *BB2 = MB[1];
 	if (BB1==nullptr || BB2==nullptr) continue;
@@ -925,7 +892,7 @@ Function *RemoveFuncIdArg(Function *F, std::vector<Argument *> &ArgsList) {
    return NF;
 }
 
-static Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *IntPtrTy, const FunctionMergingOptions &Options = {});
+static Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *IntPtrTy);
 
 void CodeMerger::destroyGeneratedCode() {
   for (Instruction *I : CreatedInsts) {
@@ -1078,20 +1045,19 @@ public:
   }
 };
 
-bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResult &AR, const FunctionMergingOptions &Options) {  
+PairwiseAlignment::PairwiseAlignment(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2, const FunctionMergingOptions &Options) {
   int TotalMatches = 0;
   int TotalInsts = 0;
   int TotalCoreMatches = 0;
 
   std::map<size_t, std::vector<BlockFingerprint> > BlocksF1;
   
-  for (BasicBlock &BB1 : *F1) {
-    BlockFingerprint BD1(&BB1);
+  for (BasicBlock *BB1 : Blocks1) {
+    BlockFingerprint BD1(BB1);
     BlocksF1[BD1.Size].push_back(BD1);
   }
   
-  for (BasicBlock &BIt : *F2) {
-    BasicBlock *BB2 = &BIt;
+  for (BasicBlock *BB2 : Blocks2) {
     BlockFingerprint BD2(BB2);
     
     auto &SetRef = BlocksF1[BD2.Size];
@@ -1152,7 +1118,9 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResu
         }
 
         if (It1!=BB1->end() || It2!=BB2->end()) {
-          return false;
+          //return false; ERROR
+          CodeAlignment::AlignedBlocks.clear();
+	  return;
         }
 
         It1 = BB1->begin();
@@ -1160,8 +1128,8 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResu
 
         bool Profitable = (MergedCost <= OriginalCost);
         if (Profitable) {
-          AR.AlignedBlocks.push_back(MatchingBlocks(BB1,BB2));
-          auto &MB = AR.AlignedBlocks.back();
+	  CodeAlignment::AlignedBlocks.push_back(MatchingBlocks(BB1,BB2));
+          auto &MB = CodeAlignment::AlignedBlocks.back();
 
           while(isa<PHINode>(*It1) || isa<LandingPadInst>(*It1)) It1++;
           while(isa<PHINode>(*It2) || isa<LandingPadInst>(*It2)) It2++;
@@ -1177,16 +1145,16 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResu
     	  if (!I1->isTerminator()) {
     	    TotalCoreMatches++;
     	  }
-            } else {
-		 AR.OnlyFullMatches = false;
-	    }
+            }
 
             It1++;
             It2++;
           }
 
           if (It1!=BB1->end() || It2!=BB2->end()) {
-            return false;
+            //return false; ERROR
+            CodeAlignment::AlignedBlocks.clear();
+	    return;
           }
           
           SetRef.erase(BestIt);
@@ -1195,35 +1163,38 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResu
   }
 
   bool Profitable = (TotalMatches==TotalInsts) || (TotalCoreMatches>0);
-  return Profitable;
+  if (!Profitable) CodeAlignment::AlignedBlocks.clear();
 }
 
-FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::string Name, const FunctionMergingOptions &Options) {
-  LLVMContext &Context = *ContextPtr;
+FunctionMergeResult llvm::MergeFunctions(Function *F1, Function *F2, const char *Name, const FunctionMergingOptions &Options) {
   FunctionMergeResult ErrorResponse(F1, F2, nullptr);
 
-  if (!validMergePair(F1,F2))
+  if (F1->getParent()!=F2->getParent())
     return ErrorResponse;
 
-  AlignmentResult AR;
-  if (!pairwiseAlignment(F1, F2, AR, Options))
+  Module *M = F1->getParent();
+
+  if (!validMergePair(F1,F2))
     return ErrorResponse;
 
   SmallVector<BasicBlock*, 8> Blocks1;
   for (auto &BB : *F1) Blocks1.push_back(&BB);
   SmallVector<BasicBlock*, 8> Blocks2;
   for (auto &BB : *F2) Blocks2.push_back(&BB);
+
+  PairwiseAlignment AR(Blocks1,Blocks2,Options);
+  if (AR.AlignedBlocks.empty())
+    return ErrorResponse;
+
   CodeMerger CG(M,Blocks1,Blocks2);
 
   ValueToValueMapTy VMap;
 
-  CG.setEntryPoints(&F1->getEntryBlock(), &F2->getEntryBlock())
-    .setContext(ContextPtr)
-    .setIntPtrType(IntPtrTy);
-  FunctionMergeResult Result = CG.defineMergedFunction(F1,F2,Name,AR,VMap,Options);
-  if (!CG.generate(AR, VMap, Options)) {
+  CG.setEntryPoints(&F1->getEntryBlock(), &F2->getEntryBlock());
+
+  FunctionMergeResult Result = CG.defineMergedFunction(F1,F2,Name,&AR,VMap,Options);
+  if (!CG.generate(&AR, VMap, Options)) {
     CG.getFunction()->eraseFromParent();
-    //MergedFunc = nullptr;
     if (Debug) errs() << "ERROR: Failed to generate the merged function!\n";
     return ErrorResponse;
   }
@@ -1247,10 +1218,13 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
 
   //Result.setFunctionIdArgument(FuncId != nullptr);
   return Result;
+  
 }
 
-void FunctionMerger::replaceByCall(Function *F, FunctionMergeResult &MFR, const FunctionMergingOptions &Options) {
-  LLVMContext &Context = M->getContext();
+void llvm::ReplaceFunctionByCall(Function *F, FunctionMergeResult &MFR) {
+  LLVMContext &Context = F->getParent()->getContext();
+  const DataLayout *DL = &F->getParent()->getDataLayout();
+  Type *IntPtrTy = DL->getIntPtrType(Context);
 
   Value *FuncId = MFR.getFunctionIdValue(F);
   Function *MergedF = MFR.getMergedFunction();
@@ -1300,13 +1274,16 @@ void FunctionMerger::replaceByCall(Function *F, FunctionMergeResult &MFR, const 
       Value *CastedAddr = Builder.CreatePointerCast(AddrCI, PointerType::get(F->getReturnType(), DL->getAllocaAddrSpace()));
       CastedV = Builder.CreateLoad(F->getReturnType(), CastedAddr);
     } else {
-      CastedV = createCastIfNeeded(CI, F->getReturnType(), Builder, IntPtrTy, Options);
+      CastedV = createCastIfNeeded(CI, F->getReturnType(), Builder, IntPtrTy);
     }
     Builder.CreateRet(CastedV);
   }
 }
 
-bool FunctionMerger::replaceCallsWith(Function *F, FunctionMergeResult &MFR, const FunctionMergingOptions &Options) {
+bool llvm::ReplaceCallsWith(Function *F, FunctionMergeResult &MFR) {
+  LLVMContext &Context = F->getParent()->getContext();
+  const DataLayout *DL = &F->getParent()->getDataLayout();
+  Type *IntPtrTy = DL->getIntPtrType(Context);
 
   Value *FuncId = MFR.getFunctionIdValue(F);
   Function *MergedF = MFR.getMergedFunction();
@@ -1371,7 +1348,7 @@ bool FunctionMerger::replaceCallsWith(Function *F, FunctionMergeResult &MFR, con
         Value *CastedAddr = Builder.CreatePointerCast(AddrCI, PointerType::get(F->getReturnType(), DL->getAllocaAddrSpace()));
         CastedV = Builder.CreateLoad(F->getReturnType(), CastedAddr);
       } else {
-        CastedV = createCastIfNeeded(NewCB, F->getReturnType(), Builder, IntPtrTy, Options);
+        CastedV = createCastIfNeeded(NewCB, F->getReturnType(), Builder, IntPtrTy);
       }
     }
 
@@ -1420,12 +1397,10 @@ static int RequiresOriginalInterfaces(FunctionMergeResult &MFR, StringSet<> &Alw
          (RequiresOriginalInterface(F2, MFR, AlwaysPreserved)?1:0);
 }
 
-void FunctionMerger::updateCallGraph(Function *F, FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options) {
-  replaceByCall(F, MFR, Options);
+void UpdateCallGraph(Function *F, FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved) {
+  ReplaceFunctionByCall(F, MFR);
   if (!RequiresOriginalInterface(F,MFR, AlwaysPreserved)) {
-    ///TODO: don't update call graph when dynamically tracing calls
-    //bool CanErase = false; //replaceCallsWith(F, MFR, Options);
-    bool CanErase = replaceCallsWith(F, MFR, Options);
+    bool CanErase = ReplaceCallsWith(F, MFR);
     CanErase = CanErase && F->use_empty();
     CanErase = CanErase && (AlwaysPreserved.find(F->getName())==AlwaysPreserved.end());
     CanErase = CanErase && !ShouldPreserveGV(F);
@@ -1434,12 +1409,12 @@ void FunctionMerger::updateCallGraph(Function *F, FunctionMergeResult &MFR, Stri
   }
 }
 
-void FunctionMerger::updateCallGraph(FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options) {
+void UpdateCallGraph(FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved) {
   auto FPair = MFR.getFunctions();
   Function *F1 = FPair.first;
   Function *F2 = FPair.second;
-  updateCallGraph(F1, MFR, AlwaysPreserved, Options);
-  updateCallGraph(F2, MFR, AlwaysPreserved, Options);
+  UpdateCallGraph(F1, MFR, AlwaysPreserved);
+  UpdateCallGraph(F2, MFR, AlwaysPreserved);
 }
 
 static int EstimateThunkOverhead(FunctionMergeResult &MFR, StringSet<> &AlwaysPreserved) {
@@ -1467,14 +1442,7 @@ static bool CompareFunctionDataScores(const FunctionData &F1,
 }
 
 
-class FunctionMerging {
-public:
-  bool runImpl(Module &M);
-};
-
 bool FunctionMerging::runImpl(Module &M) {
-
-  //errs() << "Running FMSA\n";
 
   StringSet<> AlwaysPreserved;
   AlwaysPreserved.insert("main");
@@ -1485,11 +1453,6 @@ bool FunctionMerging::runImpl(Module &M) {
                                     .maximizeParameterScore(MaxParamScore)
                                     .matchOnlyIdenticalTypes(IdenticalType)
                                     .enableUnifiedReturnTypes(EnableUnifiedReturnType);
-
-  //auto *PSI = &this->getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
-  //auto LookupBFI = [this](Function &F) {
-  //  return &this->getAnalysis<BlockFrequencyInfoWrapperPass>(F).getBFI();
-  //};
 
   //TODO: We could use a TTI pass instead.
   TargetTransformInfo TTI(M.getDataLayout());
@@ -1526,7 +1489,7 @@ bool FunctionMerging::runImpl(Module &M) {
   unsigned TotalOpReorder = 0;
   unsigned TotalBinOps = 0;
 
-  FunctionMerger FM(&M);//,PSI,LookupBFI);
+  //FunctionMerger FM(&M);//,PSI,LookupBFI);
 
   std::vector<FunctionData> Rank;
   if (ExplorationThreshold > 1)
@@ -1613,7 +1576,8 @@ bool FunctionMerging::runImpl(Module &M) {
       }
 
       std::string Name = ".m.f." + std::to_string(TotalMerges);
-      FunctionMergeResult Result = FM.merge(F1,F2,Name,Options);
+      //FunctionMergeResult Result = FM.merge(F1,F2,Name,Options);
+      FunctionMergeResult Result = MergeFunctions(F1,F2,Name.c_str(),Options);
 
       bool validFunction = true;
 
@@ -1640,7 +1604,6 @@ bool FunctionMerging::runImpl(Module &M) {
         int SizeF1F2 = SizeF1+SizeF2;
 
 	//bool Profitable = (SizeF12 + MergingOverheadThreshold) < SizeF1F2;
-
 	bool Profitable = ((int)( (( ((double)SizeF1F2) - ((double)SizeF12) ) / SizeF1F2) * 100 ) > MergingOverheadThreshold);
 	//Profitable = Profitable && ((int)( (( ((double)SizeF1F2) - ((double)SizeF12) ) / SizeF1F2) * 100 )>5);
 
@@ -1676,7 +1639,7 @@ bool FunctionMerging::runImpl(Module &M) {
         }
 #endif
 
-          FM.updateCallGraph(Result, AlwaysPreserved, Options);
+          UpdateCallGraph(Result, AlwaysPreserved);
 
           TotalMerges++;
 
@@ -1703,26 +1666,6 @@ bool FunctionMerging::runImpl(Module &M) {
         break;
       }
     }
-  }
-
-  WorkList.clear();
-
-  double MergingAverageDistance = 0;
-  unsigned MergingMaxDistance = 0;
-
-  if (Debug || Verbose) {
-    errs() << "Total operand reordering: " << TotalOpReorder << "/"
-           << TotalBinOps << " ("
-           << 100.0 * (((double)TotalOpReorder) / ((double)TotalBinOps))
-           << " %)\n";
-
-//    errs() << "Total parameter score: " << TotalParamScore << "\n";
-//    errs() << "Total number of merges: " << MergingDistance.size() << "\n";
-
-    errs() << "Average number of trials before merging: "
-           << MergingAverageDistance << "\n";
-    errs() << "Maximum number of trials before merging: " << MergingMaxDistance
-           << "\n";
   }
 
   return true;
@@ -1778,10 +1721,9 @@ static std::string GetValueName(const Value *V) {
 /// InsertBefore. The integer type equivalent to pointers must be passed as
 /// IntPtrType (get it from DataLayout). This is guaranteed to generate no-op
 /// casts, otherwise it will assert.
-//Value *FunctionMerger::createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, const FunctionMergingOptions &Options) {
-Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *IntPtrTy, const FunctionMergingOptions &Options) {
+Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *IntPtrTy) {
 
-  if (V->getType() == DstType || Options.IdenticalTypesOnly)
+  if (V->getType() == DstType)
     return V;
 
   Value *Result;
@@ -1797,7 +1739,7 @@ Value *createCastIfNeeded(Value *V, Type *DstType, IRBuilder<> &Builder, Type *I
           Builder.CreateExtractValue(V, ArrayRef<unsigned int>(I));
       Value *Element =
           createCastIfNeeded(ExtractedValue, DstType->getStructElementType(I),
-                             Builder, IntPtrTy, Options);
+                             Builder, IntPtrTy);
       Result =
           Builder.CreateInsertValue(Result, Element, ArrayRef<unsigned int>(I));
     }
@@ -1910,7 +1852,7 @@ Instruction *CodeMerger::CloneInst(IRBuilder<> &Builder, Function *MF, Instructi
 }
 
 
-void CodeMerger::CodeGen(AlignmentResult &AR, ValueToValueMapTy &VMap,
+void CodeMerger::CodeGen(CodeAlignment *AR, ValueToValueMapTy &VMap,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF1,
                     std::unordered_map<BasicBlock *, BasicBlock *> &BlocksF2,
                     std::list<MergedInstruction> &MergedInsts) {
@@ -1927,7 +1869,7 @@ void CodeMerger::CodeGen(AlignmentResult &AR, ValueToValueMapTy &VMap,
   std::unordered_set<BasicBlock *> BlocksCloned;
   
   errs() << "Cloning Merged Blocks \n";
-  for (auto &MB : AR.AlignedBlocks) {
+  for (auto &MB : AR->AlignedBlocks) {
     BasicBlock *BB1 = MB[0];
     BasicBlock *BB2 = MB[1];
 
@@ -2359,7 +2301,7 @@ bool CodeMerger::defineReturnType(Function *F1, Function *F2, const FunctionMerg
   return ReturnType!=nullptr;
 }
 
-FunctionMergeResult CodeMerger::defineMergedFunction(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options) {
+FunctionMergeResult CodeMerger::defineMergedFunction(Function *F1, Function *F2, const char *Name, CodeAlignment *AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options) {
   // Merging parameters
   std::map<unsigned, unsigned> ParamMap1;
   std::map<unsigned, unsigned> ParamMap2;
@@ -2370,10 +2312,6 @@ FunctionMergeResult CodeMerger::defineMergedFunction(Function *F1, Function *F2,
   defineReturnType(F1, F2, Options);
 
   FunctionType *FTy = FunctionType::get(getReturnType(), ArrayRef<Type*>(Args), false);
-
-  if (Name.empty()) {
-    Name = ".m.f";
-  }
 
   F = Function::Create(FTy, //GlobalValue::LinkageTypes::InternalLinkage,
                           GlobalValue::LinkageTypes::PrivateLinkage,
@@ -2429,7 +2367,7 @@ FunctionMergeResult CodeMerger::defineMergedFunction(Function *F1, Function *F2,
   return Result;
 }
 
-bool CodeMerger::generate(AlignmentResult &AR,
+bool CodeMerger::generate(CodeAlignment *AR,
                   ValueToValueMapTy &VMap,
                   const FunctionMergingOptions &Options) {
 

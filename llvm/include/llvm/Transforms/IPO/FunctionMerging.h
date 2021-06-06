@@ -162,13 +162,15 @@ public:
 
 };
 
-FunctionMergeResult MergeFunctions(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
+FunctionMergeResult MergeFunctions(Function *F1, Function *F2, const char *Name, const FunctionMergingOptions &Options);
+void ReplaceFunctionByCall(Function *F, FunctionMergeResult &MFR);
+bool ReplaceCallsWith(Function *F, FunctionMergeResult &MFR);
 
 class FunctionMergingPass : public PassInfoMixin<FunctionMergingPass> {
 public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 };
 
-
 } // namespace
+
 #endif
