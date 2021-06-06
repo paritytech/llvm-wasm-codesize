@@ -176,6 +176,7 @@ public:
 
 class CodeMerger {
 private:
+  Module *M;
   LLVMContext *ContextPtr;
   Type *IntPtrTy;
 
@@ -202,6 +203,8 @@ private:
 
   void removeRedundantInstructions(std::vector<Instruction *> &WorkInst, DominatorTree &DT);
 
+  bool defineReturnType(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
+
   Value *MergeValues(Value *V1, Value *V2, Instruction *InsertPt);
   bool AssignOperands(Instruction *I, bool IsFuncId1, ValueToValueMapTy &VMap);
   bool AssignLabelOperands(Instruction *I, std::unordered_map<BasicBlock*, BasicBlock *> &BlocksReMap, ValueToValueMapTy &VMap);
@@ -219,7 +222,9 @@ private:
                     std::list<MergedInstruction> &MergedInsts
 		    );
 public:
-  CodeMerger(ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : Blocks1(Blocks1), Blocks2(Blocks2) {}
+  CodeMerger(Module *M, ArrayRef<BasicBlock*> Blocks1, ArrayRef<BasicBlock*> Blocks2) : M(M), Blocks1(Blocks1), Blocks2(Blocks2) {}
+
+  FunctionMergeResult defineMergedFunction(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options = {});
 
   CodeMerger &setContext(LLVMContext *ContextPtr) {
     this->ContextPtr = ContextPtr;
@@ -302,6 +307,11 @@ public:
 
 };
 
+bool areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options = {});
+bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2);
+bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options = {});
+bool validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
+
 class FunctionMerger {
 private:
   Module *M;
@@ -311,11 +321,6 @@ private:
   const DataLayout *DL;
   LLVMContext *ContextPtr;
 
-  static bool areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options = {});
-
-  static bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2);
-
-  static bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options = {});
   bool pairwiseAlignment(Function *F1, Function *F2, AlignmentResult &AR, const FunctionMergingOptions &Options = {});
 
   void replaceByCall(Function *F, FunctionMergeResult &MergedFunc, const FunctionMergingOptions &Options = {});
@@ -331,8 +336,6 @@ public:
       IntPtrTy = DL->getIntPtrType(*ContextPtr);
     }
   }
-
-  bool validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options = {});
 
   void updateCallGraph(FunctionMergeResult &Result, StringSet<> &AlwaysPreserved, const FunctionMergingOptions &Options = {});
 
@@ -455,7 +458,7 @@ static bool CmpTypes(Type *TyL, Type *TyR, const DataLayout *DL) {
 
 // Any two pointers in the same address space are equivalent, intptr_t and
 // pointers are equivalent. Otherwise, standard type equivalence rules apply.
-bool FunctionMerger::areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options) {
+bool areTypesEquivalent(Type *Ty1, Type *Ty2, const DataLayout *DL, const FunctionMergingOptions &Options) {
  if (Ty1 == Ty2)
    return true;
  if (Options.IdenticalTypesOnly)
@@ -536,7 +539,7 @@ static bool matchExtractValueInsts(const ExtractValueInst *EV1, const ExtractVal
     return EV1->getIndices() == EV2->getIndices();
 }
 
-bool FunctionMerger::matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options) {
+bool matchInstructions(Instruction *I1, Instruction *I2, const FunctionMergingOptions &Options) {
   if (I1->getOpcode()!=I2->getOpcode()) return false;
 
   if (I1->getOpcode() == Instruction::Ret)
@@ -575,7 +578,7 @@ bool FunctionMerger::matchInstructions(Instruction *I1, Instruction *I2, const F
   }
 }
 
-bool FunctionMerger::matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2) {
+bool matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2) {
   if (BB1->isLandingPad() || BB2->isLandingPad()) {
     LandingPadInst *LP1 = BB1->getLandingPadInst();
     LandingPadInst *LP2 = BB2->getLandingPadInst();
@@ -586,7 +589,8 @@ bool FunctionMerger::matchBlockEntry(BasicBlock *BB1, BasicBlock *BB2) {
   return true;
 }
 
-bool FunctionMerger::validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options) {
+bool validMergeTypes(Function *F1, Function *F2, const FunctionMergingOptions &Options) {
+  const DataLayout *DL = &F1->getParent()->getDataLayout();
   bool EquivTypes = areTypesEquivalent(F1->getReturnType(), F2->getReturnType(), DL, Options);
   if (!EquivTypes &&
       !F1->getReturnType()->isVoidTy() && !F2->getReturnType()->isVoidTy()) {
@@ -1113,7 +1117,7 @@ bool FunctionMerger::pairwiseAlignment(Function *F1, Function *F2, AlignmentResu
         int MergedCost = 0;
 
         bool InsideSplit = false;
-        if (FunctionMerger::matchBlockEntry(BB1,BB2)) {
+        if (matchBlockEntry(BB1,BB2)) {
           InsideSplit = false;
         } else {
           InsideSplit = true;
@@ -1205,117 +1209,23 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
   if (!pairwiseAlignment(F1, F2, AR, Options))
     return ErrorResponse;
 
-  errs() << "Creating function type\n";
-
-  // Merging parameters
-  std::map<unsigned, unsigned> ParamMap1;
-  std::map<unsigned, unsigned> ParamMap2;
-  std::vector<Type *> Args;
-
-
-  //errs() << "Merging arguments\n";
-  MergeArguments(Context, F1, F2, AR, ParamMap1,ParamMap2,Args,Options);
-
-  Type *RetType1 = F1->getReturnType();
-  Type *RetType2 = F2->getReturnType();
-  Type *ReturnType = nullptr;
-
-  bool RequiresUnifiedReturn = false;
-  
-  if (validMergeTypes(F1, F2, Options)) {
-    errs() << "Simple return types\n";
-    ReturnType = RetType1;
-    if (ReturnType->isVoidTy()) {
-      ReturnType = RetType2;
-    }
-  } else if (Options.EnableUnifiedReturnType) {
-    errs() << "Unifying return types\n";
-    RequiresUnifiedReturn = true;
-
-    auto SizeOfTy1 = DL->getTypeStoreSize(RetType1);
-    auto SizeOfTy2 = DL->getTypeStoreSize(RetType2);
-    if (SizeOfTy1 >= SizeOfTy2) {
-      ReturnType = RetType1;
-    } else {
-      ReturnType = RetType2;
-    }
-  }
-  if (ReturnType==nullptr) {
-    return ErrorResponse;
-  }
-
-  FunctionType *FTy = FunctionType::get(ReturnType, ArrayRef<Type*>(Args), false);
-
-  if (Name.empty()) {
-    Name = ".m.f";
-  }
-
-  Function *MergedFunc =
-    Function::Create(FTy, //GlobalValue::LinkageTypes::InternalLinkage,
-                          GlobalValue::LinkageTypes::PrivateLinkage,
-                       Twine(Name), M); // merged.function
-
-  
-  errs() << "Initializing VMap\n";
-  ValueToValueMapTy VMap;
-
-  std::vector<Argument *> ArgsList;
-  for (Argument &arg : MergedFunc->args()) {
-    ArgsList.push_back(&arg);
-  }
-  Value *FuncId = ArgsList[0];
-
-  auto AttrList1 = F1->getAttributes();
-  auto AttrList2 = F2->getAttributes();
-  auto AttrListM = MergedFunc->getAttributes();
-
-  int ArgId = 0;
-  for (auto I = F1->arg_begin(), E = F1->arg_end(); I != E; I++) {
-    VMap[&(*I)] = ArgsList[ParamMap1[ArgId]];
-
-    auto AttrSet1 = AttrList1.getParamAttributes( (*I).getArgNo() );
-    AttrBuilder Attrs(AttrSet1);
-    AttrListM = AttrListM.addParamAttributes(Context, ArgsList[ParamMap1[ArgId]]->getArgNo(), Attrs );
-
-    ArgId++;
-  }
-
-  ArgId = 0;
-  for (auto I = F2->arg_begin(), E = F2->arg_end(); I != E; I++) {
-    VMap[&(*I)] = ArgsList[ParamMap2[ArgId]];
-
-    auto AttrSet2 = AttrList2.getParamAttributes( (*I).getArgNo() );
-    AttrBuilder Attrs(AttrSet2);
-    AttrListM = AttrListM.addParamAttributes(Context, ArgsList[ParamMap2[ArgId]]->getArgNo(), Attrs );
-
-    ArgId++;
-  }
-  MergedFunc->setAttributes(AttrListM);
-
-  errs() << "Setting attributes\n";
-  SetFunctionAttributes(F1,F2,MergedFunc);
-
-  Value *IsFunc1 = FuncId;
-
-  errs() << "Running code generator\n";
-
   SmallVector<BasicBlock*, 8> Blocks1;
   for (auto &BB : *F1) Blocks1.push_back(&BB);
   SmallVector<BasicBlock*, 8> Blocks2;
   for (auto &BB : *F2) Blocks2.push_back(&BB);
-  CodeMerger CG(Blocks1,Blocks2);
-  
-  CG.setCondition(IsFunc1)
-    .setEntryPoints(&F1->getEntryBlock(), &F2->getEntryBlock())
-    .setFunction(MergedFunc)
-    .setEntryPoint(BasicBlock::Create(Context, "entry", MergedFunc))
-    .setReturnType(ReturnType, RequiresUnifiedReturn)
+  CodeMerger CG(M,Blocks1,Blocks2);
+
+  ValueToValueMapTy VMap;
+
+  CG.setEntryPoints(&F1->getEntryBlock(), &F2->getEntryBlock())
     .setContext(ContextPtr)
     .setIntPtrType(IntPtrTy);
+  FunctionMergeResult Result = CG.defineMergedFunction(F1,F2,Name,AR,VMap,Options);
   if (!CG.generate(AR, VMap, Options)) {
-    MergedFunc->eraseFromParent();
-    MergedFunc = nullptr;
+    CG.getFunction()->eraseFromParent();
+    //MergedFunc = nullptr;
     if (Debug) errs() << "ERROR: Failed to generate the merged function!\n";
+    return ErrorResponse;
   }
 
   /*
@@ -1335,10 +1245,7 @@ FunctionMergeResult FunctionMerger::merge(Function *F1, Function *F2, std::strin
   }
   */
 
-  FunctionMergeResult Result(F1, F2, MergedFunc, RequiresUnifiedReturn);
-  Result.setArgumentMapping(F1, ParamMap1);
-  Result.setArgumentMapping(F2, ParamMap2);
-  Result.setFunctionIdArgument(FuncId != nullptr);
+  //Result.setFunctionIdArgument(FuncId != nullptr);
   return Result;
 }
 
@@ -1641,7 +1548,7 @@ bool FunctionMerging::runImpl(Module &M) {
 	FunctionData &FD2 = *It;
 	Function *F2 = FD2.F;
 
-        if ((!FM.validMergeTypes(F1, F2, Options) && !Options.EnableUnifiedReturnType) || !validMergePair(F1, F2))
+        if ((!validMergeTypes(F1, F2, Options) && !Options.EnableUnifiedReturnType) || !validMergePair(F1, F2))
           continue;
 
 	FD2.iterator = It;
@@ -1665,7 +1572,7 @@ bool FunctionMerging::runImpl(Module &M) {
 	FunctionData &FD2 = *It;
 	Function *F2 = FD2.F;
 
-        if ((!FM.validMergeTypes(F1, F2, Options) && !Options.EnableUnifiedReturnType) || !validMergePair(F1, F2))
+        if ((!validMergeTypes(F1, F2, Options) && !Options.EnableUnifiedReturnType) || !validMergePair(F1, F2))
           continue;
 
 	FD2.iterator = It;
@@ -2421,6 +2328,105 @@ AllocaInst *CodeMerger::MemfyInst(Instruction *I) {
   StoreInstIntoAddr(I, Addr);
 
   return Addr;
+}
+
+bool CodeMerger::defineReturnType(Function *F1, Function *F2, const FunctionMergingOptions &Options) {
+  RetType1 = F1->getReturnType();
+  RetType2 = F2->getReturnType();
+  ReturnType = nullptr;
+  RequiresUnifiedReturn = false;
+  
+  if (validMergeTypes(F1, F2, Options)) {
+    errs() << "Simple return types\n";
+    ReturnType = RetType1;
+    if (ReturnType->isVoidTy()) {
+      ReturnType = RetType2;
+    }
+  } else if (Options.EnableUnifiedReturnType) {
+    errs() << "Unifying return types\n";
+    RequiresUnifiedReturn = true;
+
+    const DataLayout *DL = &F1->getParent()->getDataLayout();
+    auto SizeOfTy1 = DL->getTypeStoreSize(RetType1);
+    auto SizeOfTy2 = DL->getTypeStoreSize(RetType2);
+    if (SizeOfTy1 >= SizeOfTy2) {
+      ReturnType = RetType1;
+    } else {
+      ReturnType = RetType2;
+    }
+  }
+
+  return ReturnType!=nullptr;
+}
+
+FunctionMergeResult CodeMerger::defineMergedFunction(Function *F1, Function *F2, std::string Name, AlignmentResult &AR, ValueToValueMapTy &VMap, const FunctionMergingOptions &Options) {
+  // Merging parameters
+  std::map<unsigned, unsigned> ParamMap1;
+  std::map<unsigned, unsigned> ParamMap2;
+  std::vector<Type *> Args;
+
+  MergeArguments(getContext(), F1, F2, AR, ParamMap1,ParamMap2,Args,Options);
+  
+  defineReturnType(F1, F2, Options);
+
+  FunctionType *FTy = FunctionType::get(getReturnType(), ArrayRef<Type*>(Args), false);
+
+  if (Name.empty()) {
+    Name = ".m.f";
+  }
+
+  F = Function::Create(FTy, //GlobalValue::LinkageTypes::InternalLinkage,
+                          GlobalValue::LinkageTypes::PrivateLinkage,
+                       Twine(Name), M); // merged.function
+
+  FunctionMergeResult Result(F1,F2,F,RequiresUnifiedReturn);
+  Result.setArgumentMapping(F1,ParamMap1);
+  Result.setArgumentMapping(F2,ParamMap2);
+  Result.setFunctionIdArgument(true);
+
+  std::vector<Argument *> ArgsList;
+  for (Argument &arg : F->args()) {
+    ArgsList.push_back(&arg);
+  }
+  Value *FuncId = ArgsList[0];
+
+  auto AttrList1 = F1->getAttributes();
+  auto AttrList2 = F2->getAttributes();
+  auto AttrListM = F->getAttributes();
+
+  int ArgId = 0;
+  for (auto I = F1->arg_begin(), E = F1->arg_end(); I != E; I++) {
+    VMap[&(*I)] = ArgsList[ParamMap1[ArgId]];
+
+    auto AttrSet1 = AttrList1.getParamAttributes( (*I).getArgNo() );
+    AttrBuilder Attrs(AttrSet1);
+    AttrListM = AttrListM.addParamAttributes(getContext(), ArgsList[ParamMap1[ArgId]]->getArgNo(), Attrs );
+
+    ArgId++;
+  }
+
+  ArgId = 0;
+  for (auto I = F2->arg_begin(), E = F2->arg_end(); I != E; I++) {
+    VMap[&(*I)] = ArgsList[ParamMap2[ArgId]];
+
+    auto AttrSet2 = AttrList2.getParamAttributes( (*I).getArgNo() );
+    AttrBuilder Attrs(AttrSet2);
+    AttrListM = AttrListM.addParamAttributes(getContext(), ArgsList[ParamMap2[ArgId]]->getArgNo(), Attrs );
+
+    ArgId++;
+  }
+  F->setAttributes(AttrListM);
+
+  errs() << "Setting attributes\n";
+  SetFunctionAttributes(F1,F2,F);
+
+  //Value *IsFunc1 = FuncId;
+  IsFirst = FuncId;
+
+  setEntryPoint(BasicBlock::Create(getContext(), "entry", F));
+  setReturnType(ReturnType, RequiresUnifiedReturn);
+
+  return Result;
 }
 
 bool CodeMerger::generate(AlignmentResult &AR,
