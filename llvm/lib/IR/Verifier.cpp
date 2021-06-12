@@ -115,6 +115,9 @@
 
 using namespace llvm;
 
+//#define _DBG(_C_) {_C_;}
+#define _DBG(_C_) 
+
 static cl::opt<bool> VerifyNoAliasScopeDomination(
     "verify-noalias-scope-decl-dom", cl::Hidden, cl::init(false),
     cl::desc("Ensure that llvm.experimental.noalias.scope.decl for identical "
@@ -1890,9 +1893,11 @@ void Verifier::verifyParameterAttrs(AttributeSet Attrs, Type *Ty,
 // The value V is printed in error messages.
 void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
                                    const Value *V, bool IsIntrinsic) {
+  _DBG(errs() << "Function Attr: visit 0: " << Broken << "\n");
   if (Attrs.isEmpty())
     return;
 
+  _DBG(errs() << "Function Attr: visit 1: " << Broken << "\n");
   if (AttributeListsVisited.insert(Attrs.getRawPointer()).second) {
     Assert(Attrs.hasParentContext(Context),
            "Attribute list does not match Module context!", &Attrs, V);
@@ -1906,6 +1911,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
     }
   }
 
+  _DBG(errs() << "Function Attr: visit 2: " << Broken << "\n");
   bool SawNest = false;
   bool SawReturned = false;
   bool SawSRet = false;
@@ -1913,6 +1919,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
   bool SawSwiftAsync = false;
   bool SawSwiftError = false;
 
+  _DBG(errs() << "Function Attr: visit 3: " << Broken << "\n");
   // Verify return value attributes.
   AttributeSet RetAttrs = Attrs.getRetAttributes();
   Assert((!RetAttrs.hasAttribute(Attribute::ByVal) &&
@@ -1932,31 +1939,38 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
          "'returned', 'swiftself', 'swiftasync', and 'swifterror'"
          " do not apply to return values!",
          V);
+  _DBG(errs() << "Function Attr: visit 4: " << Broken << "\n");
   Assert((!RetAttrs.hasAttribute(Attribute::ReadOnly) &&
           !RetAttrs.hasAttribute(Attribute::WriteOnly) &&
           !RetAttrs.hasAttribute(Attribute::ReadNone)),
          "Attribute '" + RetAttrs.getAsString() +
              "' does not apply to function returns",
          V);
+  _DBG(errs() << "Function Attr: visit 5: " << Broken << "\n");
   verifyParameterAttrs(RetAttrs, FT->getReturnType(), V);
 
+  _DBG(errs() << "Function Attr: visit 6: " << Broken << "\n");
   // Verify parameter attributes.
   for (unsigned i = 0, e = FT->getNumParams(); i != e; ++i) {
     Type *Ty = FT->getParamType(i);
     AttributeSet ArgAttrs = Attrs.getParamAttributes(i);
 
+    _DBG(errs() << "Function Attr: visit 6.1: " << Broken << "\n");
     if (!IsIntrinsic) {
       Assert(!ArgAttrs.hasAttribute(Attribute::ImmArg),
              "immarg attribute only applies to intrinsics",V);
     }
 
+    _DBG(errs() << "Function Attr: visit 6.2: " << Broken << "\n");
     verifyParameterAttrs(ArgAttrs, Ty, V);
 
+    _DBG(errs() << "Function Attr: visit 6.3: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::Nest)) {
       Assert(!SawNest, "More than one parameter has attribute nest!", V);
       SawNest = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.4: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::Returned)) {
       Assert(!SawReturned, "More than one parameter has attribute returned!",
              V);
@@ -1966,6 +1980,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       SawReturned = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.5: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::StructRet)) {
       Assert(!SawSRet, "Cannot have multiple 'sret' parameters!", V);
       Assert(i == 0 || i == 1,
@@ -1973,59 +1988,73 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       SawSRet = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.6: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::SwiftSelf)) {
       Assert(!SawSwiftSelf, "Cannot have multiple 'swiftself' parameters!", V);
       SawSwiftSelf = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.7: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::SwiftAsync)) {
       Assert(!SawSwiftAsync, "Cannot have multiple 'swiftasync' parameters!", V);
       SawSwiftAsync = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.8: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::SwiftError)) {
       Assert(!SawSwiftError, "Cannot have multiple 'swifterror' parameters!",
              V);
       SawSwiftError = true;
     }
 
+    _DBG(errs() << "Function Attr: visit 6.8: " << Broken << "\n");
     if (ArgAttrs.hasAttribute(Attribute::InAlloca)) {
       Assert(i == FT->getNumParams() - 1,
              "inalloca isn't on the last parameter!", V);
     }
+    _DBG(errs() << "Function Attr: visit 6.9: " << Broken << "\n");
   }
 
+  _DBG(errs() << "Function Attr: visit 7: " << Broken << "\n");
   if (!Attrs.hasAttributes(AttributeList::FunctionIndex))
     return;
 
+  _DBG(errs() << "Function Attr: visit 8: " << Broken << "\n");
   verifyAttributeTypes(Attrs.getFnAttributes(), /*IsFunction=*/true, V);
 
+  _DBG(errs() << "Function Attr: visit 9: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::ReadNone) &&
            Attrs.hasFnAttribute(Attribute::ReadOnly)),
          "Attributes 'readnone and readonly' are incompatible!", V);
 
+  _DBG(errs() << "Function Attr: visit 10: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::ReadNone) &&
            Attrs.hasFnAttribute(Attribute::WriteOnly)),
          "Attributes 'readnone and writeonly' are incompatible!", V);
 
+  _DBG(errs() << "Function Attr: visit 11: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::ReadOnly) &&
            Attrs.hasFnAttribute(Attribute::WriteOnly)),
          "Attributes 'readonly and writeonly' are incompatible!", V);
 
+  _DBG(errs() << "Function Attr: visit 12: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::ReadNone) &&
            Attrs.hasFnAttribute(Attribute::InaccessibleMemOrArgMemOnly)),
          "Attributes 'readnone and inaccessiblemem_or_argmemonly' are "
          "incompatible!",
          V);
 
+  _DBG(errs() << "Function Attr: visit 13: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::ReadNone) &&
            Attrs.hasFnAttribute(Attribute::InaccessibleMemOnly)),
          "Attributes 'readnone and inaccessiblememonly' are incompatible!", V);
 
+  _DBG(errs() << "Function Attr: visit 14: " << Broken << "\n");
   Assert(!(Attrs.hasFnAttribute(Attribute::NoInline) &&
            Attrs.hasFnAttribute(Attribute::AlwaysInline)),
          "Attributes 'noinline and alwaysinline' are incompatible!", V);
 
+  _DBG(errs() << "Function Attr: visit 15: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::OptimizeNone)) {
     Assert(Attrs.hasFnAttribute(Attribute::NoInline),
            "Attribute 'optnone' requires 'noinline'!", V);
@@ -2037,12 +2066,14 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
            "Attributes 'minsize and optnone' are incompatible!", V);
   }
 
+  _DBG(errs() << "Function Attr: visit 16: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::JumpTable)) {
     const GlobalValue *GV = cast<GlobalValue>(V);
     Assert(GV->hasGlobalUnnamedAddr(),
            "Attribute 'jumptable' requires 'unnamed_addr'", V);
   }
 
+  _DBG(errs() << "Function Attr: visit 17: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::AllocSize)) {
     std::pair<unsigned, Optional<unsigned>> Args =
         Attrs.getAllocSizeArgs(AttributeList::FunctionIndex);
@@ -2070,6 +2101,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       return;
   }
 
+  _DBG(errs() << "Function Attr: visit 18: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::VScaleRange)) {
     std::pair<unsigned, unsigned> Args =
         Attrs.getVScaleRangeArgs(AttributeList::FunctionIndex);
@@ -2078,6 +2110,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       CheckFailed("'vscale_range' minimum cannot be greater than maximum", V);
   }
 
+  _DBG(errs() << "Function Attr: visit 19: " << Broken << "\n");
   if (Attrs.hasFnAttribute("frame-pointer")) {
     StringRef FP = Attrs.getAttribute(AttributeList::FunctionIndex,
                                       "frame-pointer").getValueAsString();
@@ -2085,6 +2118,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       CheckFailed("invalid value for 'frame-pointer' attribute: " + FP, V);
   }
 
+  _DBG(errs() << "Function Attr: visit 20: " << Broken << "\n");
   if (Attrs.hasFnAttribute("patchable-function-prefix")) {
     StringRef S = Attrs
                       .getAttribute(AttributeList::FunctionIndex,
@@ -2095,6 +2129,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       CheckFailed(
           "\"patchable-function-prefix\" takes an unsigned integer: " + S, V);
   }
+  _DBG(errs() << "Function Attr: visit 21: " << Broken << "\n");
   if (Attrs.hasFnAttribute("patchable-function-entry")) {
     StringRef S = Attrs
                       .getAttribute(AttributeList::FunctionIndex,
@@ -2105,6 +2140,7 @@ void Verifier::verifyFunctionAttrs(FunctionType *FT, AttributeList Attrs,
       CheckFailed(
           "\"patchable-function-entry\" takes an unsigned integer: " + S, V);
   }
+  _DBG(errs() << "Function Attr: visit 22: " << Broken << "\n");
 }
 
 void Verifier::verifyFunctionMetadata(
@@ -2392,7 +2428,9 @@ void Verifier::verifySiblingFuncletUnwinds() {
 // visitFunction - Verify that a function is ok.
 //
 void Verifier::visitFunction(const Function &F) {
+  _DBG(errs() << "Function: visit 0: " << Broken << "\n");
   visitGlobalValue(F);
+  _DBG(errs() << "Function: visit 1: " << Broken << "\n");
 
   // Check function arguments.
   FunctionType *FT = F.getFunctionType();
@@ -2401,34 +2439,44 @@ void Verifier::visitFunction(const Function &F) {
   Assert(&Context == &F.getContext(),
          "Function context does not match Module context!", &F);
 
+  _DBG(errs() << "Function: visit 2: " << Broken << "\n");
   Assert(!F.hasCommonLinkage(), "Functions may not have common linkage", &F);
+  _DBG(errs() << "Function: visit 3: " << Broken << "\n");
   Assert(FT->getNumParams() == NumArgs,
          "# formal arguments must match # of arguments for function type!", &F,
          FT);
+  _DBG(errs() << "Function: visit 4: " << Broken << "\n");
   Assert(F.getReturnType()->isFirstClassType() ||
              F.getReturnType()->isVoidTy() || F.getReturnType()->isStructTy(),
          "Functions cannot return aggregate values!", &F);
 
+  _DBG(errs() << "Function: visit 5: " << Broken << "\n");
   Assert(!F.hasStructRetAttr() || F.getReturnType()->isVoidTy(),
          "Invalid struct return type!", &F);
 
+  _DBG(errs() << "Function: visit 6: " << Broken << "\n");
   AttributeList Attrs = F.getAttributes();
 
+  _DBG(errs() << "Function: visit 7: " << Broken << "\n");
   Assert(verifyAttributeCount(Attrs, FT->getNumParams()),
          "Attribute after last parameter!", &F);
 
+  _DBG(errs() << "Function: visit 8: " << Broken << "\n");
   bool isLLVMdotName = F.getName().size() >= 5 &&
                        F.getName().substr(0, 5) == "llvm.";
 
+  _DBG(errs() << "Function: visit 9: " << Broken << "\n");
   // Check function attributes.
   verifyFunctionAttrs(FT, Attrs, &F, isLLVMdotName);
 
+  _DBG(errs() << "Function: visit 10: " << Broken << "\n");
   // On function declarations/definitions, we do not support the builtin
   // attribute. We do not check this in VerifyFunctionAttrs since that is
   // checking for Attributes that can/can not ever be on functions.
   Assert(!Attrs.hasFnAttribute(Attribute::Builtin),
          "Attribute 'builtin' can only be applied to a callsite.", &F);
 
+  _DBG(errs() << "Function: visit 11: " << Broken << "\n");
   // Check that this function meets the restrictions on this calling convention.
   // Sometimes varargs is used for perfectly forwarding thunks, so some of these
   // restrictions can be lifted.
@@ -2487,6 +2535,7 @@ void Verifier::visitFunction(const Function &F) {
     break;
   }
 
+  _DBG(errs() << "Function: visit 12: " << Broken << "\n");
   // Check that the argument values match the function type for this function...
   unsigned i = 0;
   for (const Argument &Arg : F.args()) {
@@ -2511,6 +2560,7 @@ void Verifier::visitFunction(const Function &F) {
     ++i;
   }
 
+  _DBG(errs() << "Function: visit 13: " << Broken << "\n");
   if (!isLLVMdotName) {
     Assert(!F.getReturnType()->isTokenTy(),
            "Function returns a token but isn't an intrinsic", &F);
@@ -2518,12 +2568,14 @@ void Verifier::visitFunction(const Function &F) {
            "Function returns a x86_amx but isn't an intrinsic", &F);
   }
 
+  _DBG(errs() << "Function: visit 14: " << Broken << "\n");
   // Get the function metadata attachments.
   SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
   F.getAllMetadata(MDs);
   assert(F.hasMetadata() != MDs.empty() && "Bit out-of-sync");
   verifyFunctionMetadata(MDs);
 
+  _DBG(errs() << "Function: visit 15: " << Broken << "\n");
   // Check validity of the personality function
   if (F.hasPersonalityFn()) {
     auto *Per = dyn_cast<Function>(F.getPersonalityFn()->stripPointerCasts());
@@ -2533,6 +2585,7 @@ void Verifier::visitFunction(const Function &F) {
              &F, F.getParent(), Per, Per->getParent());
   }
 
+  _DBG(errs() << "Function: visit 16: " << Broken << "\n");
   if (F.isMaterializable()) {
     // Function has a body somewhere we can't see.
     Assert(MDs.empty(), "unmaterialized function cannot have metadata", &F,
@@ -2606,6 +2659,7 @@ void Verifier::visitFunction(const Function &F) {
     }
   }
 
+  _DBG(errs() << "Function: visit 17: " << Broken << "\n");
   // If this function is actually an intrinsic, verify that it is only used in
   // direct call/invokes, never having its "address taken".
   // Only do this if the module is materialized, otherwise we don't have all the
@@ -2616,11 +2670,13 @@ void Verifier::visitFunction(const Function &F) {
       Assert(false, "Invalid user of intrinsic instruction!", U);
   }
 
+  _DBG(errs() << "Function: visit 18: " << Broken << "\n");
   auto *N = F.getSubprogram();
   HasDebugInfo = (N != nullptr);
   if (!HasDebugInfo)
     return;
 
+  _DBG(errs() << "Function: visit 19: " << Broken << "\n");
   // Check that all !dbg attachments lead to back to N.
   //
   // FIXME: Check this incrementally while visiting !dbg attachments.
@@ -2657,6 +2713,7 @@ void Verifier::visitFunction(const Function &F) {
              "!dbg attachment points at wrong subprogram for function", N, &F,
              &I, DL, Scope, SP);
   };
+  _DBG(errs() << "Function: visit 20: " << Broken << "\n");
   for (auto &BB : F)
     for (auto &I : BB) {
       VisitDebugLoc(I, I.getDebugLoc().getAsMDNode());
@@ -2667,6 +2724,7 @@ void Verifier::visitFunction(const Function &F) {
       if (BrokenDebugInfo)
         return;
     }
+  _DBG(errs() << "Function: visit -: " << Broken << "\n");
 }
 
 // verifyBasicBlock - Verify that a basic block is well formed...
@@ -3085,6 +3143,7 @@ void Verifier::visitAddrSpaceCastInst(AddrSpaceCastInst &I) {
 /// visitPHINode - Ensure that a PHI node is well formed.
 ///
 void Verifier::visitPHINode(PHINode &PN) {
+  _DBG(errs() << "PHI: visit 0: " << Broken << "\n");
   // Ensure that the PHI nodes are all grouped together at the top of the block.
   // This can be tested by checking whether the instruction before this is
   // either nonexistent (because this is begin()) or is a PHI node.  If not,
@@ -3093,9 +3152,11 @@ void Verifier::visitPHINode(PHINode &PN) {
              isa<PHINode>(--BasicBlock::iterator(&PN)),
          "PHI nodes not grouped at top of basic block!", &PN, PN.getParent());
 
+  _DBG(errs() << "PHI: visit 1: " << Broken << "\n");
   // Check that a PHI doesn't yield a Token.
   Assert(!PN.getType()->isTokenTy(), "PHI nodes cannot have token type!");
 
+  _DBG(errs() << "PHI: visit 2: " << Broken << "\n");
   // Check that all of the values of the PHI node have the same type as the
   // result, and that the incoming blocks are really basic blocks.
   for (Value *IncValue : PN.incoming_values()) {
@@ -3105,20 +3166,26 @@ void Verifier::visitPHINode(PHINode &PN) {
 
   // All other PHI node constraints are checked in the visitBasicBlock method.
 
+  _DBG(errs() << "PHI: visit 3: " << Broken << "\n");
   visitInstruction(PN);
+  _DBG(errs() << "PHI: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitCallBase(CallBase &Call) {
+  _DBG(errs() << "CallBase: visit 0: " << Broken << "\n");
   Assert(Call.getCalledOperand()->getType()->isPointerTy(),
          "Called function must be a pointer!", Call);
   PointerType *FPTy = cast<PointerType>(Call.getCalledOperand()->getType());
 
+  _DBG(errs() << "CallBase: visit 1: " << Broken << "\n");
   Assert(FPTy->getElementType()->isFunctionTy(),
          "Called function is not pointer to function type!", Call);
 
+  _DBG(errs() << "CallBase: visit 2: " << Broken << "\n");
   Assert(FPTy->getElementType() == Call.getFunctionType(),
          "Called function is not the same type as the call!", Call);
 
+  _DBG(errs() << "CallBase: visit 3: " << Broken << "\n");
   FunctionType *FTy = Call.getFunctionType();
 
   // Verify that the correct number of arguments are being passed
@@ -3130,23 +3197,27 @@ void Verifier::visitCallBase(CallBase &Call) {
     Assert(Call.arg_size() == FTy->getNumParams(),
            "Incorrect number of arguments passed to called function!", Call);
 
+  _DBG(errs() << "CallBase: visit 4: " << Broken << "\n");
   // Verify that all arguments to the call match the function type.
   for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i)
     Assert(Call.getArgOperand(i)->getType() == FTy->getParamType(i),
            "Call parameter type does not match function signature!",
            Call.getArgOperand(i), FTy->getParamType(i), Call);
 
+  _DBG(errs() << "CallBase: visit 5: " << Broken << "\n");
   AttributeList Attrs = Call.getAttributes();
 
   Assert(verifyAttributeCount(Attrs, Call.arg_size()),
          "Attribute after last parameter!", Call);
 
+  _DBG(errs() << "CallBase: visit 6: " << Broken << "\n");
   bool IsIntrinsic = Call.getCalledFunction() &&
                      Call.getCalledFunction()->getName().startswith("llvm.");
 
   Function *Callee =
       dyn_cast<Function>(Call.getCalledOperand()->stripPointerCasts());
 
+  _DBG(errs() << "CallBase: visit 7: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::Speculatable)) {
     // Don't allow speculatable on call sites, unless the underlying function
     // declaration is also speculatable.
@@ -3154,6 +3225,7 @@ void Verifier::visitCallBase(CallBase &Call) {
            "speculatable attribute may not apply to call sites", Call);
   }
 
+  _DBG(errs() << "CallBase: visit 8: " << Broken << "\n");
   if (Attrs.hasFnAttribute(Attribute::Preallocated)) {
     Assert(Call.getCalledFunction()->getIntrinsicID() ==
                Intrinsic::call_preallocated_arg,
@@ -3161,9 +3233,11 @@ void Verifier::visitCallBase(CallBase &Call) {
            "llvm.call.preallocated.arg");
   }
 
+  _DBG(errs() << "CallBase: visit 9: " << Broken << "\n");
   // Verify call attributes.
   verifyFunctionAttrs(FTy, Attrs, &Call, IsIntrinsic);
 
+  _DBG(errs() << "CallBase: visit 10: " << Broken << "\n");
   // Conservatively check the inalloca argument.
   // We have a bug if we can find that there is an underlying alloca without
   // inalloca.
@@ -3174,25 +3248,33 @@ void Verifier::visitCallBase(CallBase &Call) {
              "inalloca argument for call has mismatched alloca", AI, Call);
   }
 
+  _DBG(errs() << "CallBase: visit 11: " << Broken << "\n");
+  Call.dump();
   // For each argument of the callsite, if it has the swifterror argument,
   // make sure the underlying alloca/parameter it comes from has a swifterror as
   // well.
   for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i) {
+
+    _DBG(errs() << "CallBase: visit 11.1: " << Broken << "\n");
     if (Call.paramHasAttr(i, Attribute::SwiftError)) {
       Value *SwiftErrorArg = Call.getArgOperand(i);
+      _DBG(errs() << "CallBase: visit 11.2: " << Broken << "\n");
       if (auto AI = dyn_cast<AllocaInst>(SwiftErrorArg->stripInBoundsOffsets())) {
         Assert(AI->isSwiftError(),
                "swifterror argument for call has mismatched alloca", AI, Call);
         continue;
       }
+      _DBG(errs() << "CallBase: visit 11.3: " << Broken << "\n");
       auto ArgI = dyn_cast<Argument>(SwiftErrorArg);
       Assert(ArgI,
              "swifterror argument should come from an alloca or parameter",
              SwiftErrorArg, Call);
+      _DBG(errs() << "CallBase: visit 11.4: " << Broken << "\n");
       Assert(ArgI->hasSwiftErrorAttr(),
              "swifterror argument for call has mismatched parameter", ArgI,
              Call);
     }
+    _DBG(errs() << "CallBase: visit 11.5: " << Broken << "\n");
 
     if (Attrs.hasParamAttribute(i, Attribute::ImmArg)) {
       // Don't allow immarg on call sites, unless the underlying declaration
@@ -3201,25 +3283,30 @@ void Verifier::visitCallBase(CallBase &Call) {
              "immarg may not apply only to call sites",
              Call.getArgOperand(i), Call);
     }
+    _DBG(errs() << "CallBase: visit 11.6: " << Broken << "\n");
 
     if (Call.paramHasAttr(i, Attribute::ImmArg)) {
       Value *ArgVal = Call.getArgOperand(i);
       Assert(isa<ConstantInt>(ArgVal) || isa<ConstantFP>(ArgVal),
              "immarg operand has non-immediate parameter", ArgVal, Call);
     }
+    _DBG(errs() << "CallBase: visit 11.7: " << Broken << "\n");
 
     if (Call.paramHasAttr(i, Attribute::Preallocated)) {
       Value *ArgVal = Call.getArgOperand(i);
       bool hasOB =
           Call.countOperandBundlesOfType(LLVMContext::OB_preallocated) != 0;
       bool isMustTail = Call.isMustTailCall();
+      _DBG(errs() << "CallBase: visit 11.8: " << Broken << "\n");
       Assert(hasOB != isMustTail,
              "preallocated operand either requires a preallocated bundle or "
              "the call to be musttail (but not both)",
              ArgVal, Call);
     }
+    _DBG(errs() << "CallBase: visit 11.9: " << Broken << "\n");
   }
 
+  _DBG(errs() << "CallBase: visit 12: " << Broken << "\n");
   if (FTy->isVarArg()) {
     // FIXME? is 'nest' even legal here?
     bool SawNest = false;
@@ -3268,6 +3355,7 @@ void Verifier::visitCallBase(CallBase &Call) {
     }
   }
 
+  _DBG(errs() << "CallBase: visit 13: " << Broken << "\n");
   // Verify that there's no metadata unless it's a direct call to an intrinsic.
   if (!IsIntrinsic) {
     for (Type *ParamTy : FTy->params()) {
@@ -3278,6 +3366,7 @@ void Verifier::visitCallBase(CallBase &Call) {
     }
   }
 
+  _DBG(errs() << "CallBase: visit 14: " << Broken << "\n");
   // Verify that indirect calls don't return tokens.
   if (!Call.getCalledFunction()) {
     Assert(!FTy->getReturnType()->isTokenTy(),
@@ -3286,10 +3375,12 @@ void Verifier::visitCallBase(CallBase &Call) {
            "Return type cannot be x86_amx for indirect call!");
   }
 
+  _DBG(errs() << "CallBase: visit 15: " << Broken << "\n");
   if (Function *F = Call.getCalledFunction())
     if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
       visitIntrinsicCall(ID, Call);
 
+  _DBG(errs() << "CallBase: visit 16: " << Broken << "\n");
   // Verify that a callsite has at most one "deopt", at most one "funclet", at
   // most one "gc-transition", at most one "cfguardtarget",
   // and at most one "preallocated" operand bundle.
@@ -3344,12 +3435,14 @@ void Verifier::visitCallBase(CallBase &Call) {
     }
   }
 
+  _DBG(errs() << "CallBase: visit 16: " << Broken << "\n");
   if (FoundAttachedCallBundle)
     Assert(FTy->getReturnType()->isPointerTy(),
            "a call with operand bundle \"clang.arc.attachedcall\" must call a "
            "function returning a pointer",
            Call);
 
+  _DBG(errs() << "CallBase: visit 17: " << Broken << "\n");
   // Verify that each inlinable callsite of a debug-info-bearing function in a
   // debug-info-bearing function has a debug location attached to it. Failure to
   // do so causes assertion failures when the inliner sets up inline scope info.
@@ -3360,7 +3453,9 @@ void Verifier::visitCallBase(CallBase &Call) {
              "debug info must have a !dbg location",
              Call);
 
+  _DBG(errs() << "CallBase: visit 18: " << Broken << "\n");
   visitInstruction(Call);
+  _DBG(errs() << "CallBase: visit -: " << Broken << "\n");
 }
 
 /// Two types are "congruent" if they are identical, or if they are both pointer
@@ -3505,6 +3600,7 @@ void Verifier::visitUnaryOperator(UnaryOperator &U) {
 /// of the same type!
 ///
 void Verifier::visitBinaryOperator(BinaryOperator &B) {
+  _DBG(errs() << "BinOp: visit 0: " << Broken << "\n");
   Assert(B.getOperand(0)->getType() == B.getOperand(1)->getType(),
          "Both operands to a binary operator are not of the same type!", &B);
 
@@ -3564,9 +3660,11 @@ void Verifier::visitBinaryOperator(BinaryOperator &B) {
   }
 
   visitInstruction(B);
+  _DBG(errs() << "BinOp: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitICmpInst(ICmpInst &IC) {
+  _DBG(errs() << "ICmp: visit 0: " << Broken << "\n");
   // Check that the operands are the same type
   Type *Op0Ty = IC.getOperand(0)->getType();
   Type *Op1Ty = IC.getOperand(1)->getType();
@@ -3580,6 +3678,7 @@ void Verifier::visitICmpInst(ICmpInst &IC) {
          "Invalid predicate in ICmp instruction!", &IC);
 
   visitInstruction(IC);
+  _DBG(errs() << "ICmp: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitFCmpInst(FCmpInst &FC) {
@@ -3599,17 +3698,23 @@ void Verifier::visitFCmpInst(FCmpInst &FC) {
 }
 
 void Verifier::visitExtractElementInst(ExtractElementInst &EI) {
+  _DBG(errs() << "ExtractEl: visit 0: " << Broken << "\n");
   Assert(
       ExtractElementInst::isValidOperands(EI.getOperand(0), EI.getOperand(1)),
       "Invalid extractelement operands!", &EI);
+  _DBG(errs() << "ExtractEl: visit 1: " << Broken << "\n");
   visitInstruction(EI);
+  _DBG(errs() << "ExtractEl: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitInsertElementInst(InsertElementInst &IE) {
+  _DBG(errs() << "InsertEl: visit 0: " << Broken << "\n");
   Assert(InsertElementInst::isValidOperands(IE.getOperand(0), IE.getOperand(1),
                                             IE.getOperand(2)),
          "Invalid insertelement operands!", &IE);
+  _DBG(errs() << "InsertEl: visit 1: " << Broken << "\n");
   visitInstruction(IE);
+  _DBG(errs() << "InsertEl: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitShuffleVectorInst(ShuffleVectorInst &SV) {
@@ -3622,22 +3727,28 @@ void Verifier::visitShuffleVectorInst(ShuffleVectorInst &SV) {
 void Verifier::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   Type *TargetTy = GEP.getPointerOperandType()->getScalarType();
 
+  _DBG(errs() << "GEP: visit 0: " << Broken << "\n");
   Assert(isa<PointerType>(TargetTy),
          "GEP base pointer is not a vector or a vector of pointers", &GEP);
+  _DBG(errs() << "GEP: visit 1: " << Broken << "\n");
   Assert(GEP.getSourceElementType()->isSized(), "GEP into unsized type!", &GEP);
 
+  _DBG(errs() << "GEP: visit 2: " << Broken << "\n");
   SmallVector<Value *, 16> Idxs(GEP.indices());
   Assert(all_of(
       Idxs, [](Value* V) { return V->getType()->isIntOrIntVectorTy(); }),
       "GEP indexes must be integers", &GEP);
+  _DBG(errs() << "GEP: visit 3: " << Broken << "\n");
   Type *ElTy =
       GetElementPtrInst::getIndexedType(GEP.getSourceElementType(), Idxs);
   Assert(ElTy, "Invalid indices for GEP pointer type!", &GEP);
 
+  _DBG(errs() << "GEP: visit 4: " << Broken << "\n");
   Assert(GEP.getType()->isPtrOrPtrVectorTy() &&
              GEP.getResultElementType() == ElTy,
          "GEP is not of right type for indices!", &GEP, ElTy);
 
+  _DBG(errs() << "GEP: visit 5: " << Broken << "\n");
   if (auto *GEPVTy = dyn_cast<VectorType>(GEP.getType())) {
     // Additional checks for vector GEPs.
     ElementCount GEPWidth = GEPVTy->getElementCount();
@@ -3657,12 +3768,15 @@ void Verifier::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     }
   }
 
+  _DBG(errs() << "GEP: visit 6: " << Broken << "\n");
   if (auto *PTy = dyn_cast<PointerType>(GEP.getType())) {
     Assert(GEP.getAddressSpace() == PTy->getAddressSpace(),
            "GEP address space doesn't match type", &GEP);
   }
 
+  _DBG(errs() << "GEP: visit 7: " << Broken << "\n");
   visitInstruction(GEP);
+  _DBG(errs() << "GEP: visit -: " << Broken << "\n");
 }
 
 static bool isContiguous(const ConstantRange &A, const ConstantRange &B) {
@@ -3725,6 +3839,7 @@ void Verifier::checkAtomicMemAccessSize(Type *Ty, const Instruction *I) {
 }
 
 void Verifier::visitLoadInst(LoadInst &LI) {
+  _DBG(errs() << "Load: visit 0: " << Broken << "\n");
   PointerType *PTy = dyn_cast<PointerType>(LI.getOperand(0)->getType());
   Assert(PTy, "Load operand must be a pointer.", &LI);
   Type *ElTy = LI.getType();
@@ -3748,9 +3863,11 @@ void Verifier::visitLoadInst(LoadInst &LI) {
   }
 
   visitInstruction(LI);
+  _DBG(errs() << "Load: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitStoreInst(StoreInst &SI) {
+  _DBG(errs() << "Store: visit 0: " << Broken << "\n");
   PointerType *PTy = dyn_cast<PointerType>(SI.getOperand(1)->getType());
   Assert(PTy, "Store operand must be a pointer.", &SI);
   Type *ElTy = SI.getOperand(0)->getType();
@@ -3775,6 +3892,7 @@ void Verifier::visitStoreInst(StoreInst &SI) {
            "Non-atomic store cannot have SynchronizationScope specified", &SI);
   }
   visitInstruction(SI);
+  _DBG(errs() << "Store: visit -: " << Broken << "\n");
 }
 
 /// Check that SwiftErrorVal is used as a swifterror argument in CS.
@@ -4004,13 +4122,16 @@ void Verifier::visitEHPadPredecessors(Instruction &I) {
 }
 
 void Verifier::visitLandingPadInst(LandingPadInst &LPI) {
+  _DBG(errs() << "LPad: visit 0: " << Broken << "\n");
   // The landingpad instruction is ill-formed if it doesn't have any clauses and
   // isn't a cleanup.
   Assert(LPI.getNumClauses() > 0 || LPI.isCleanup(),
          "LandingPadInst needs at least one clause or to be a cleanup.", &LPI);
 
+  _DBG(errs() << "LPad: visit 1: " << Broken << "\n");
   visitEHPadPredecessors(LPI);
 
+  _DBG(errs() << "LPad: visit 2: " << Broken << "\n");
   if (!LandingPadResultTy)
     LandingPadResultTy = LPI.getType();
   else
@@ -4019,16 +4140,19 @@ void Verifier::visitLandingPadInst(LandingPadInst &LPI) {
            "inside a function.",
            &LPI);
 
+  _DBG(errs() << "LPad: visit 3: " << Broken << "\n");
   Function *F = LPI.getParent()->getParent();
   Assert(F->hasPersonalityFn(),
          "LandingPadInst needs to be in a function with a personality.", &LPI);
 
+  _DBG(errs() << "LPad: visit 4: " << Broken << "\n");
   // The landingpad instruction must be the first non-PHI instruction in the
   // block.
   Assert(LPI.getParent()->getLandingPadInst() == &LPI,
          "LandingPadInst not the first non-PHI instruction in the block.",
          &LPI);
 
+  _DBG(errs() << "LPad: visit 5: " << Broken << "\n");
   for (unsigned i = 0, e = LPI.getNumClauses(); i < e; ++i) {
     Constant *Clause = LPI.getClause(i);
     if (LPI.isCatch(i)) {
@@ -4041,7 +4165,9 @@ void Verifier::visitLandingPadInst(LandingPadInst &LPI) {
     }
   }
 
+  _DBG(errs() << "LPad: visit 6: " << Broken << "\n");
   visitInstruction(LPI);
+  _DBG(errs() << "LPad: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitResumeInst(ResumeInst &RI) {
@@ -4326,6 +4452,7 @@ void Verifier::visitCleanupReturnInst(CleanupReturnInst &CRI) {
 }
 
 void Verifier::verifyDominatesUse(Instruction &I, unsigned i) {
+  _DBG(errs() << "Dominance: visit 0: " << Broken << "\n");
   Instruction *Op = cast<Instruction>(I.getOperand(i));
   // If the we have an invalid invoke, don't try to compute the dominance.
   // We already reject it in the invoke specific checks and the dominance
@@ -4346,8 +4473,11 @@ void Verifier::verifyDominatesUse(Instruction &I, unsigned i) {
     return;
 
   const Use &U = I.getOperandUse(i);
+
+  _DBG(errs() << "Dominance: visit 1: " << Broken << "\n");
   Assert(DT.dominates(Op, U),
          "Instruction does not dominate all uses!", Op, &I);
+  _DBG(errs() << "Dominance: visit -: " << Broken << "\n");
 }
 
 void Verifier::visitDereferenceableMetadata(Instruction& I, MDNode* MD) {

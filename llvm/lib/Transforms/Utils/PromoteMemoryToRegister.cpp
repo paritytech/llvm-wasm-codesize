@@ -997,6 +997,7 @@ NextIteration:
   // Keep track of the successors so we don't visit the same successor twice
   SmallPtrSet<BasicBlock *, 8> VisitedSuccs;
 
+  
   // Handle the first successor without using the worklist.
   VisitedSuccs.insert(*I);
   Pred = BB;
