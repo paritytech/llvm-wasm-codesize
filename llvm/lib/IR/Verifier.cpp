@@ -3249,7 +3249,6 @@ void Verifier::visitCallBase(CallBase &Call) {
   }
 
   _DBG(errs() << "CallBase: visit 11: " << Broken << "\n");
-  Call.dump();
   // For each argument of the callsite, if it has the swifterror argument,
   // make sure the underlying alloca/parameter it comes from has a swifterror as
   // well.

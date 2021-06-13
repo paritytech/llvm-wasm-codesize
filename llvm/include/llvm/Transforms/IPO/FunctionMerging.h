@@ -67,23 +67,15 @@ namespace llvm{
 /// A set of parameters used to control the transforms by MergeFunctions.
 struct FunctionMergingOptions {
   bool MaximizeParamScore;
-  bool IdenticalTypesOnly;
   bool EnableUnifiedReturnType;
 
   FunctionMergingOptions(bool MaximizeParamScore = true,
-                         bool IdenticalTypesOnly = true,
                          bool EnableUnifiedReturnType = true)
     : MaximizeParamScore(MaximizeParamScore),
-      IdenticalTypesOnly(IdenticalTypesOnly),
       EnableUnifiedReturnType(EnableUnifiedReturnType) {}
 
   FunctionMergingOptions &maximizeParameterScore(bool MPS) {
     MaximizeParamScore = MPS;
-    return *this;
-  }
-
-  FunctionMergingOptions &matchOnlyIdenticalTypes(bool IT) {
-    IdenticalTypesOnly = IT;
     return *this;
   }
 
