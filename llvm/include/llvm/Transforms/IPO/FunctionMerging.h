@@ -68,11 +68,15 @@ namespace llvm{
 struct FunctionMergingOptions {
   bool MaximizeParamScore;
   bool EnableUnifiedReturnType;
+  bool EnableOperandReordering;
+  unsigned MaxNumSelection;
 
   FunctionMergingOptions(bool MaximizeParamScore = true,
-                         bool EnableUnifiedReturnType = true)
+                         bool EnableUnifiedReturnType = true,
+			 unsigned MaxNumSelection = 500)
     : MaximizeParamScore(MaximizeParamScore),
-      EnableUnifiedReturnType(EnableUnifiedReturnType) {}
+      EnableUnifiedReturnType(EnableUnifiedReturnType),
+      MaxNumSelection(MaxNumSelection)	{}
 
   FunctionMergingOptions &maximizeParameterScore(bool MPS) {
     MaximizeParamScore = MPS;
@@ -81,6 +85,16 @@ struct FunctionMergingOptions {
 
   FunctionMergingOptions &enableUnifiedReturnTypes(bool URT) {
     EnableUnifiedReturnType = URT;
+    return *this;
+  }
+
+  FunctionMergingOptions &enableOperandReordering(bool EOR) {
+    EnableOperandReordering = EOR;
+    return *this;
+  }
+
+  FunctionMergingOptions &maximumNumberSelections(unsigned MNS) {
+    MaxNumSelection = MNS;
     return *this;
   }
 };

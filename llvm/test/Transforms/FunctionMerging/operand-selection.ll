@@ -20,7 +20,7 @@ entry:
   ret i32 %mul
 }
 
-; CHECK-LABEL: define private i32 @.m.f.0(i1 %0, i32 %1, i32 %2) local_unnamed_addr
+; CHECK-LABEL: define internal i32 @merged(i1 %0, i32 %1, i32 %2) local_unnamed_addr
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    %3 = add nsw i32 %2, %1
 ; CHECK-NEXT:    %4 = select i1 %0, i32 1, i32 2
