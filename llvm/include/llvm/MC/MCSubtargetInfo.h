@@ -223,6 +223,15 @@ public:
     return 0;
   }
 
+  ArrayRef<SubtargetSubTypeKV> getCPUTable() const {
+    return ProcDesc;
+  }
+
+  ArrayRef<SubtargetFeatureKV> getFeatureTable() const {
+    return ProcFeatures;
+  }
+
+
   /// Check whether the CPU string is valid.
   bool isCPUStringValid(StringRef CPU) const {
     auto Found = llvm::lower_bound(ProcDesc, CPU);

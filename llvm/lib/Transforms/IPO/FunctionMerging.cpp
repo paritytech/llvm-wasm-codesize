@@ -1713,9 +1713,9 @@ bool CodeMerger::assignPHIOperandsInBlock(BasicBlock *BB, std::unordered_map<Bas
         NewPHI->addIncoming(V, NewPredBB);
       }
       if (FoundIndices.size()!=IncomingBlocks.size()) { //PHI->getNumIncomingValues()
-	BB->dump();
-	PHI->dump();
-	NewPHI->dump();
+	// BB->dump();
+	// PHI->dump();
+	// NewPHI->dump();
         return false;
       }
     }

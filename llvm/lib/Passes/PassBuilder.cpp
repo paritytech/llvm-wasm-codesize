@@ -109,7 +109,8 @@
 #include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/IPO/LoopExtractor.h"
 #include "llvm/Transforms/IPO/LowerTypeTests.h"
-#include "llvm/Transforms/IPO/MergeFunctions.h"
+#include "llvm/Transforms/IPO/FunctionMerging.h"
+// #include "llvm/Transforms/IPO/MergeFunctions.h"
 #include "llvm/Transforms/IPO/OpenMPOpt.h"
 #include "llvm/Transforms/IPO/PartialInlining.h"
 #include "llvm/Transforms/IPO/SCCP.h"
@@ -1434,7 +1435,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
 
   // Merge functions if requested.
   if (PTO.MergeFunctions)
-    MPM.addPass(MergeFunctionsPass());
+    MPM.addPass(FunctionMergingPass());
 
   // LoopSink pass sinks instructions hoisted by LICM, which serves as a
   // canonicalization pass that enables other optimizations. As a result,
@@ -1907,7 +1908,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
   MPM.addPass(GlobalDCEPass());
 
   if (PTO.MergeFunctions)
-    MPM.addPass(MergeFunctionsPass());
+    MPM.addPass(FunctionMergingPass());
 
   // Emit annotation remarks.
   addAnnotationRemarksPass(MPM);
@@ -1944,7 +1945,7 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
       /*InsertLifetimeIntrinsics=*/PTO.Coroutines));
 
   if (PTO.MergeFunctions)
-    MPM.addPass(MergeFunctionsPass());
+    MPM.addPass(FunctionMergingPass());
 
   if (EnableMatrix)
     MPM.addPass(
